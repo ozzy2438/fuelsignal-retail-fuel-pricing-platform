@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fuelsignal"
+version = "0.1.0"
+description = "Retail Fuel Pricing & Price-Cycle Forecasting Platform"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Osman Orka", email = "osman@example.com"}
+]
+
+dependencies = [
+    "pyspark>=3.4.0",
+    "delta-spark>=2.4.0",
+    "databricks-sdk>=0.20.0",
+    "requests>=2.31.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0.0",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.11.0",
+    "ruff>=0.1.0",
+    "black>=23.9.0",
+    "mypy>=1.5.0",
+    "pre-commit>=3.4.0",
+]
+notebooks = [
+    "ipykernel>=6.25.0",
+    "matplotlib>=3.7.0",
+    "seaborn>=0.12.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "S", "B", "A", "COM", "C4", "PT"]
+ignore = ["S101", "COM812"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: Unit tests (no external dependencies)",
+    "integration: Integration tests (require Databricks connection)",
+]
+addopts = "-v --tb=short -m 'not integration'"
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true

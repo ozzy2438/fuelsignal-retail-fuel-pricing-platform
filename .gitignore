@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Secrets and credentials - NEVER COMMIT
+.env
+.env.local
+.env.production
+*.pem
+*.key
+credentials.json
+token.json
+secrets/
+.databrickscfg
+
+# Databricks
+.databricks/
+*.whl
+
+# Data files (raw downloads)
+data/
+*.csv
+*.parquet
+*.json.gz
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Logs
+*.log
+logs/
