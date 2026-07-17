@@ -1,0 +1,54 @@
+# FuelSignal Project Configuration
+# This file defines global project settings used across all pipeline stages.
+
+project:
+  name: "FuelSignal"
+  description: "Retail Fuel Pricing & Price-Cycle Forecasting Platform"
+  version: "0.1.0"
+  type: "public_portfolio_project"
+  author: "Osman Orka"
+  repository: "https://github.com/ozzy2438/fuelsignal-retail-fuel-pricing-platform"
+
+platform:
+  provider: "databricks"
+  runtime: "free_edition"
+  compute: "serverless_or_cluster"
+  storage_format: "delta"
+
+architecture:
+  catalog: "main"  # May need adjustment based on workspace capabilities
+  schema_prefix: "fuelsignal"
+  schemas:
+    bronze: "fuelsignal_bronze"
+    silver: "fuelsignal_silver"
+    gold: "fuelsignal_gold"
+    monitoring: "fuelsignal_monitoring"
+
+geography:
+  country: "Australia"
+  state: "NSW"
+  target_stations: 40
+  competitor_radius_km: 5.0
+
+pricing:
+  currency: "AUD"
+  unit: "cents_per_litre"
+  plausible_min_cpl: 80.0
+  plausible_max_cpl: 300.0
+  tgp_plausible_min_cpl: 60.0
+  tgp_plausible_max_cpl: 250.0
+
+jump_detection:
+  # Price jump = increase of at least this many cpl from previous day median
+  min_jump_cpl: 5.0
+  # Alternative: percentage-based
+  min_jump_pct: 3.0
+  # Forecast horizon in hours
+  forecast_horizon_hours: 48
+
+pipeline:
+  default_full_refresh: false
+  max_retry_attempts: 3
+  retry_delay_seconds: 30
+  request_timeout_seconds: 60
+  batch_size: 10000

@@ -1,0 +1,38 @@
+# FuelSignal Environment Configuration
+
+environments:
+  dev:
+    catalog: "main"
+    schema_prefix: "fuelsignal"
+    compute:
+      type: "serverless"  # or specified cluster
+    logging:
+      level: "DEBUG"
+      include_row_counts: true
+    pipeline:
+      full_refresh_allowed: true
+      max_records_per_batch: 1000
+
+  staging:
+    catalog: "main"
+    schema_prefix: "fuelsignal_staging"
+    compute:
+      type: "job_cluster"
+    logging:
+      level: "INFO"
+      include_row_counts: true
+    pipeline:
+      full_refresh_allowed: true
+      max_records_per_batch: 50000
+
+  prod:
+    catalog: "main"
+    schema_prefix: "fuelsignal"
+    compute:
+      type: "job_cluster"
+    logging:
+      level: "WARNING"
+      include_row_counts: true
+    pipeline:
+      full_refresh_allowed: false
+      max_records_per_batch: 100000

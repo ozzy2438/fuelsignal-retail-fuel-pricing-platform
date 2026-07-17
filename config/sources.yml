@@ -1,0 +1,101 @@
+# FuelSignal Data Source Registry
+# All data sources must be official public sources with documented provenance.
+# DO NOT store credentials here. Use environment variables for authentication.
+
+sources:
+  nsw_fuelcheck:
+    name: "NSW FuelCheck"
+    description: "Real-time and historical retail fuel prices for NSW stations"
+    provider: "NSW Government - Data.NSW"
+    landing_page: "https://data.nsw.gov.au/data/dataset/fuel-check"
+    api_base: "https://api.onegov.nsw.gov.au/FuelCheckApp/v2/fuel/prices"
+    # Alternative: CKAN data resource for historical downloads
+    ckan_dataset: "https://data.nsw.gov.au/data/api/3/action/package_show?id=fuel-check"
+    data_format: "json"
+    frequency: "daily"
+    coverage:
+      geographic: "NSW, Australia"
+      temporal: "2016-present"
+      granularity: "station-level, fuel-type-level"
+    fields_expected:
+      - station_code
+      - station_name
+      - brand
+      - address
+      - suburb
+      - postcode
+      - latitude
+      - longitude
+      - fuel_type
+      - price
+      - last_updated
+    notes: |
+      The FuelCheck API requires an API key obtainable via registration.
+      Historical data may be available via CKAN bulk downloads.
+      Rate limits apply to real-time API access.
+
+  aip_terminal_gate_prices:
+    name: "AIP Terminal Gate Prices"
+    description: "Wholesale terminal gate prices published by the Australian Institute of Petroleum"
+    provider: "Australian Institute of Petroleum (AIP)"
+    landing_page: "https://www.aip.com.au/pricing/terminal-gate-prices"
+    # TGP data is typically published as structured tables on the page
+    data_format: "html_table"
+    frequency: "daily"
+    coverage:
+      geographic: "All Australian capital cities and major terminals"
+      temporal: "Rolling historical"
+      granularity: "terminal-level, product-level, daily"
+    fields_expected:
+      - date
+      - terminal_city
+      - product
+      - price_cpl
+    notes: |
+      TGP data is published on the AIP website.
+      May require HTML parsing or structured extraction.
+      Products include ULP, PULP, Diesel, E10 etc.
+
+  accc_petrol_cycles:
+    name: "ACCC Petrol Price Cycles"
+    description: "Information and methodology for petrol price cycle analysis"
+    provider: "Australian Competition & Consumer Commission"
+    landing_page: "https://www.accc.gov.au/consumers/petrol-and-fuel/petrol-price-cycles"
+    data_format: "reference_only"
+    frequency: "quarterly_reports"
+    usage: "methodology_and_context"
+    notes: |
+      The ACCC publishes reports on fuel market behaviour.
+      Primary use is for understanding cycle methodology and validation.
+      Structured data extracts may be available in quarterly monitoring reports.
+
+  nsw_public_holidays:
+    name: "NSW Public Holidays"
+    description: "Official NSW public holiday dates"
+    provider: "NSW Government - Industrial Relations"
+    landing_page: "https://www.industrialrelations.nsw.gov.au/public-holidays/public-holidays-in-nsw"
+    # Alternative structured source
+    alternative_api: "https://data.gov.au/data/api/3/action/package_show?id=australian-holidays"
+    data_format: "html_or_json"
+    frequency: "annual"
+    coverage:
+      geographic: "NSW, Australia"
+      temporal: "Current and upcoming years"
+      granularity: "daily"
+    fields_expected:
+      - date
+      - holiday_name
+      - state
+      - is_national
+    notes: |
+      Public holidays affect fuel demand patterns.
+      Both state and national holidays should be captured.
+      Consider using data.gov.au API for structured access.
+
+data_download_rules:
+  - "Always use official government or industry body sources"
+  - "Never use Kaggle, unofficial GitHub repos, or scraped mirrors"
+  - "Record both landing page URL and actual download/API URL"
+  - "Include timeout, retry, and error handling in all downloaders"
+  - "Preserve raw source artifacts before transformation"
+  - "Log retrieval time and source metadata in audit records"

@@ -1,0 +1,135 @@
+# FuelSignal Data Quality Configuration
+# Defines rules, thresholds, and actions for data quality checks.
+
+quality_rules:
+  fuel_prices:
+    required_columns:
+      - station_id
+      - fuel_type
+      - price_cpl
+      - observed_at
+    validations:
+      station_id_not_null:
+        column: station_id
+        rule: not_null
+        severity: critical
+        action: quarantine
+      price_numeric:
+        column: price_cpl
+        rule: is_numeric
+        severity: critical
+        action: quarantine
+      price_plausible:
+        column: price_cpl
+        rule: between
+        params:
+          min: 80.0
+          max: 300.0
+        severity: warning
+        action: flag
+      timestamp_parseable:
+        column: observed_at
+        rule: is_timestamp
+        severity: critical
+        action: quarantine
+      latitude_valid:
+        column: latitude
+        rule: between
+        params:
+          min: -44.0
+          max: -10.0
+        severity: warning
+        action: flag
+      longitude_valid:
+        column: longitude
+        rule: between
+        params:
+          min: 112.0
+          max: 154.0
+        severity: warning
+        action: flag
+      duplicate_detection:
+        columns: [station_id, fuel_type, observed_at]
+        rule: unique_combination
+        severity: warning
+        action: deduplicate_keep_latest
+
+  terminal_gate_prices:
+    required_columns:
+      - tgp_date
+      - terminal
+      - fuel_type
+      - tgp_cpl
+    validations:
+      date_parseable:
+        column: tgp_date
+        rule: is_date
+        severity: critical
+        action: quarantine
+      terminal_identifiable:
+        column: terminal
+        rule: not_null
+        severity: critical
+        action: quarantine
+      tgp_positive:
+        column: tgp_cpl
+        rule: greater_than
+        params:
+          value: 0
+        severity: critical
+        action: quarantine
+      tgp_plausible:
+        column: tgp_cpl
+        rule: between
+        params:
+          min: 60.0
+          max: 250.0
+        severity: warning
+        action: flag
+      duplicate_date_product:
+        columns: [tgp_date, terminal, fuel_type]
+        rule: unique_combination
+        severity: warning
+        action: deduplicate_keep_latest
+
+  station_master:
+    required_columns:
+      - station_id
+      - station_name
+      - brand
+      - latitude
+      - longitude
+    validations:
+      stable_station_key:
+        column: station_id
+        rule: not_null
+        severity: critical
+        action: quarantine
+      valid_coordinates:
+        columns: [latitude, longitude]
+        rule: valid_nsw_coordinates
+        severity: warning
+        action: flag
+      brand_normalized:
+        column: brand
+        rule: in_set
+        params:
+          reference: "config/brand_mapping.yml"
+        severity: info
+        action: log
+
+freshness:
+  fuel_prices:
+    max_hours_stale: 36
+    alert_hours_stale: 24
+  terminal_gate_prices:
+    max_hours_stale: 72
+    alert_hours_stale: 48
+  public_holidays:
+    max_days_stale: 90
+    alert_days_stale: 60
+
+thresholds:
+  max_quarantine_pct: 5.0  # Alert if more than 5% of records quarantined
+  min_record_count: 100    # Alert if fewer records than expected
+  max_duplicate_pct: 2.0   # Alert if duplicate rate exceeds 2%
