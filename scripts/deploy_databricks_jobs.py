@@ -51,7 +51,12 @@ from typing import Any
 
 import requests
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+try:
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+except NameError:
+    # Databricks git_source spark_python_task executes via an exec-style context
+    # where __file__ is undefined - the working directory is the repo checkout root.
+    PROJECT_ROOT = Path.cwd()
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
@@ -91,7 +96,14 @@ def _task(
 ) -> dict[str, Any]:
     task: dict[str, Any] = {
         "task_key": task_key,
-        "spark_python_task": {"python_file": python_file},
+        # source: GIT is required for git_source-based file tasks - without it the
+        # platform looks for python_file in the workspace filesystem instead of the
+        # git checkout and fails with "Cannot read the python file" (live-verified
+        # 2026-07-18). Without it, __file__ is also undefined inside the script (the
+        # file runs through an exec-style context, not a plain `python file.py`
+        # invocation) - every script's PROJECT_ROOT falls back to Path.cwd() to
+        # handle that; see the try/except at the top of each script.
+        "spark_python_task": {"python_file": python_file, "source": "GIT"},
         "environment_key": task_key,
         "spark_env_vars": _env_vars(host),
     }
@@ -101,7 +113,9 @@ def _task(
 
 
 def _environment(task_key: str, deps: list[str]) -> dict[str, Any]:
-    return {"environment_key": task_key, "spec": {"client": "1", "dependencies": deps}}
+    # client "1" fails on this workspace ("Invalid platform channel Client-1",
+    # live-verified 2026-07-18 - the cluster never launches); "2" works.
+    return {"environment_key": task_key, "spec": {"client": "2", "dependencies": deps}}
 
 
 def build_job_definitions(host: str) -> list[dict[str, Any]]:

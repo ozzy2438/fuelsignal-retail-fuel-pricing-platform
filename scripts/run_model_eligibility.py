@@ -18,7 +18,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+try:
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+except NameError:
+    # Databricks git_source spark_python_task executes via an exec-style context
+    # where __file__ is undefined - the working directory is the repo checkout root.
+    PROJECT_ROOT = Path.cwd()
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from deploy_databricks_foundation import DatabricksSqlClient, DeploymentError  # noqa: E402

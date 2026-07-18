@@ -16,7 +16,12 @@ import requests
 if TYPE_CHECKING:
     import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+try:
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+except NameError:
+    # Databricks git_source spark_python_task executes via an exec-style context
+    # where __file__ is undefined - the working directory is the repo checkout root.
+    PROJECT_ROOT = Path.cwd()
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from fuelsignal.bronze.schemas import get_bronze_ddl  # noqa: E402

@@ -6,7 +6,12 @@ import json
 import sys
 from pathlib import Path
 
-SCRIPTS_DIR = Path(__file__).resolve().parent
+try:
+    SCRIPTS_DIR = Path(__file__).resolve().parent
+except NameError:
+    # Databricks git_source spark_python_task executes via an exec-style context
+    # where __file__ is undefined - the working directory is the repo checkout root.
+    SCRIPTS_DIR = Path.cwd() / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from deploy_databricks_foundation import DatabricksSqlClient  # noqa: E402

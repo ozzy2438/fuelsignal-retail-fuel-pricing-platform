@@ -19,7 +19,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+try:
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+except NameError:
+    # Databricks git_source spark_python_task executes via an exec-style context
+    # where __file__ is undefined - the working directory is the repo checkout root.
+    PROJECT_ROOT = Path.cwd()
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from deploy_databricks_foundation import (  # noqa: E402
@@ -486,7 +491,11 @@ class GoldPipeline:
         """
         checks: dict[str, Any] = {}
 
-        source_text = Path(__file__).read_text()
+        try:
+            self_path = Path(__file__)
+        except NameError:
+            self_path = PROJECT_ROOT / "scripts" / "run_gold_pipeline.py"
+        source_text = self_path.read_text()
         feature_building_methods = (
             "build_station_daily_market",
             "build_indicative_margin",
