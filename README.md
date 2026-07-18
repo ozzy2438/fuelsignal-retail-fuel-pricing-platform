@@ -58,7 +58,7 @@ This platform supports daily pricing decisions by:
                               │
                               ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│  FUTURE: MLflow + Databricks Jobs + Power BI                         │
+│  MLflow + Databricks Jobs (live, scheduled) + Power BI (docs only)   │
 │  • Price-jump probability model  • Walk-forward backtest              │
 │  • HOLD/FOLLOW/LEAD recommendations  • Scheduled retraining           │
 └──────────────────────────────────────────────────────────────────────┘
@@ -195,12 +195,12 @@ make lint
 | Pricing policy (HOLD/FOLLOW/LEAD) | ✅ Complete - three-way safety gate, see docs/pricing-policy.md |
 | Six-month walk-forward policy backtest | ✅ Complete - 398,474 rows, see docs/pricing-policy.md |
 | Dashboard-ready output tables/views | ✅ Complete - see docs/pricing-policy.md SS7 |
-| Databricks Jobs (daily pipeline + monitoring) | ⚠️ Deployed, schedule PAUSED - see docs/jobs-and-scheduling.md |
+| Databricks Jobs (daily pipeline + monitoring) | ✅ Deployed, live-validated via Run Now, schedules UNPAUSED - see docs/jobs-and-scheduling.md |
 | Data quality framework | ✅ Complete |
 | Unit tests | ✅ Complete (183 tests) |
 | CI/CD pipeline | ✅ Complete |
 | Documentation | ✅ Complete |
-| Power BI integration | ❌ Not started |
+| Power BI integration | ⚠️ Connection instructions documented, report not yet built - see docs/power-bi-connection.md |
 
 ## ⚠️ Limitations
 
@@ -222,11 +222,13 @@ make lint
    and deliberately not activated - no ground truth exists to validate it against
    (docs/margin-proxy-investigation.md). See docs/pricing-policy.md SS4-5 for the full
    detail - this is the single most important caveat before any production use.
-3. **Scheduled jobs exist but are paused pending a credential** — two Databricks Jobs
-   (daily pipeline + monitoring) are deployed with real cron schedules, but a
-   long-lived job-execution token was deliberately not created by the agent
-   (provisioning a new standing credential on a live account was left for a human -
-   see docs/jobs-and-scheduling.md for the exact activation steps).
+3. **FuelCheck station-reference credentials not yet provisioned as a job secret** —
+   the scheduled `fuelsignal-daily-pipeline` job authenticates to Databricks itself
+   fine (a dedicated job-execution PAT was provisioned as a Databricks secret and
+   live-validated via Run Now), but `FUELCHECK_API_KEY`/`FUELCHECK_API_SECRET` were
+   not, so the ingestion task's station-reference refresh sub-step fails gracefully
+   rather than running - Bronze/Silver/Gold refresh and jump/forecast scoring are
+   unaffected (see docs/jobs-and-scheduling.md §6).
 4. **Station coverage is bounded by the live reference API's current snapshot** — a bulk
    station that has closed/rebranded since the reference API was last queried, or whose
    address text formatting doesn't match, will not resolve to a coordinate and is
@@ -315,21 +317,38 @@ investigated and explicitly **not activated** - no ground truth TGP data exists 
 validate it against (`docs/margin-proxy-investigation.md`). Four dashboard-ready views
 plus a `monitoring_fuel_policy_status` reference table were deployed
 (`docs/pricing-policy.md` §7). Two Databricks Jobs (`fuelsignal-daily-pipeline`,
-`fuelsignal-monitoring-checks`) were deployed live with real cron schedules, but left
-**PAUSED** - provisioning the long-lived credential the jobs need to authenticate was
-deliberately left for a human, not created unattended by the agent
-(`docs/jobs-and-scheduling.md` has the exact activation steps). Full results:
-docs/pricing-policy.md.
+`fuelsignal-monitoring-checks`) were deployed live with real cron schedules, initially
+left **PAUSED** pending credential provisioning. Full results: docs/pricing-policy.md.
+
+Week 2 Phase 6 (Final operational validation) is complete: a dedicated job-execution
+PAT was provisioned and stored as a Databricks secret (never committed to git);
+`scripts/score_daily.py` now reads only a bounded 60-day trailing window instead of
+the full historical archive (127,171 rows pulled instead of 839,906, same 1,739 rows
+scored); both jobs were run end-to-end via Run Now and validated (auth succeeded, all
+tasks `SUCCESS`, `monitoring_pricing_policy_recommendations`/`monitoring_pipeline_runs`
+updated with **zero duplicate rows**, run metadata logged to both the Databricks job
+history and MLflow) before their schedules were switched to **UNPAUSED**. Seven
+distinct live-only infrastructure bugs were found and fixed in the process (serverless
+environment client version, git-sourced file tasks needing explicit `source: GIT`,
+`__file__`/cwd resolution under Databricks' exec-style execution,
+`spark_env_vars` not reaching the task process, `{{secrets/...}}` templating not
+resolving in task parameters, `SystemExit(0)` being treated as task failure, and an
+MLflow query picking up the wrong run) - full list: docs/jobs-and-scheduling.md §4.
+Exact Power BI connection instructions for the four dashboard-ready objects were
+documented: docs/power-bi-connection.md. The three-way `recommendation_status` safety
+gate was not touched during this phase - no unsafe fuel policy was enabled.
 
 **Still no commercial-impact claim anywhere in the repository.** Next:
 
-1. **Provision the job-execution credential and unpause the schedules** — the one
-   remaining step to make the daily pipeline actually run (docs/jobs-and-scheduling.md)
+1. **Provision FuelCheck station-reference credentials as a job secret** — the one
+   remaining ingestion sub-step not yet wired up for the scheduled job (see the
+   limitations section above and docs/jobs-and-scheduling.md §6)
 2. **Resolve the TGP coverage gap** — either accept it as a permanent limitation for
    E10/P95/P98/PDL or source real wholesale data for those four fuel types before any
    production FOLLOW automation (docs/margin-proxy-investigation.md)
-3. **Power BI** — connect a report to the dashboard views/tables already deployed
-   (`docs/pricing-policy.md` §7)
+3. **Power BI** — build the actual report against the documented connection
+   (docs/power-bi-connection.md); the dashboard views/tables themselves are live and
+   already validated end to end
 
 ## 📄 License
 

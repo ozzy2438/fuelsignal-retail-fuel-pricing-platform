@@ -1,5 +1,5 @@
 """Deploy the daily FuelSignal pipeline and monitoring as Databricks Jobs (Week 2
-Phase 5 - operationalisation).
+Phase 5-6 - operationalisation).
 
 This workspace is serverless-only (confirmed live 2026-07-18: `clusters/list`
 returns no clusters, only a Serverless SQL Warehouse) - every task below runs as a
@@ -16,24 +16,34 @@ both in one pass, reusing the same reused-not-retrained models as the backtest):
 - **fuelsignal-monitoring-checks** (standalone): validate_pipeline. Runs
   independently so it can report status even if the main pipeline fails.
 
-## Credential requirement - NOT completed by this script
+## Credential provisioning (completed 2026-07-18, not committed to git)
 
-Every task needs `DATABRICKS_HOST`/`DATABRICKS_TOKEN` in its execution environment
-for `databricks_auth()` (scripts/run_ingestion_pipeline.py) to authenticate back to
-this same workspace's REST APIs - there is no cluster-local `dbutils` session these
-scripts use. `DATABRICKS_HOST` is not sensitive and is set as a literal
-`spark_env_vars` value below; `DATABRICKS_TOKEN` is templated as
-`{{secrets/fuelsignal/token}}` and requires a Databricks secret to actually exist:
+A dedicated long-lived PAT ("fuelsignal-scheduled-jobs", 90-day lifetime) was
+created and stored as the Databricks secret `fuelsignal/token`
+(`databricks secrets create-scope fuelsignal` +
+`databricks secrets put-secret fuelsignal token`) - never in this repo. Every task
+needs `DATABRICKS_HOST`/`DATABRICKS_TOKEN` in its execution environment for
+`databricks_auth()` (scripts/run_ingestion_pipeline.py) to authenticate back to
+this same workspace's REST APIs. Two bugs were found and fixed via live
+`run-now` validation before this worked:
 
-    databricks secrets create-scope fuelsignal
-    databricks secrets put-secret fuelsignal token   # paste a long-lived PAT
+1. `{{secrets/scope/key}}` templating does NOT resolve inside
+   `spark_python_task.parameters` on this workspace (the literal unsubstituted
+   string was received, causing an HTTP 401) - `databricks_auth()` now falls back
+   to `databricks.sdk.runtime.dbutils.secrets.get()`, the documented, reliable
+   channel for reading a secret from inside a running job.
+2. `environments[].spec.client` must be `"2"`, not `"1"` ("Invalid platform
+   channel Client-1" otherwise - the cluster never launches).
 
-A dedicated long-lived PAT for job execution was NOT created by this script or by
-the agent that wrote it - credential creation was deliberately left for a human to
-do explicitly, rather than an agent minting new standing credentials on a live
-account unattended. Every job below is created with its schedule PAUSED for the
-same reason - see docs/jobs-and-scheduling.md for the full rationale and the exact
-activation steps once the secret exists.
+## Schedule status: UNPAUSED (activated 2026-07-18 after live validation)
+
+Both jobs were run manually via `run-now` end to end (all tasks succeeded,
+`monitoring_pricing_policy_recommendations` and `monitoring_pipeline_runs` updated
+with no duplicates) before their schedules were switched on - see
+docs/jobs-and-scheduling.md for the full validation record. If this script is
+re-run after a change serious enough to warrant re-validation, temporarily set
+`SCHEDULE_PAUSE_STATUS = "PAUSED"` below, validate again with `run-now`, then
+switch it back.
 
 Idempotent: re-running this script updates existing jobs (matched by name) in place
 via `jobs/reset` rather than creating duplicates.
@@ -100,6 +110,9 @@ BASE_DEPS = [
 ML_DEPS = [*BASE_DEPS, "lightgbm>=4.0.0", "scikit-learn>=1.3.0", "mlflow>=2.10.0"]
 
 TIMEZONE = "Australia/Sydney"
+# UNPAUSED since 2026-07-18 after both jobs were live-validated end to end via
+# run-now - see the module docstring for when to flip this back to "PAUSED".
+SCHEDULE_PAUSE_STATUS = "UNPAUSED"
 
 
 def _credential_parameters(host: str) -> list[str]:
@@ -183,7 +196,7 @@ def build_job_definitions(host: str) -> list[dict[str, Any]]:
             "schedule": {
                 "quartz_cron_expression": "0 0 5 * * ?",
                 "timezone_id": TIMEZONE,
-                "pause_status": "PAUSED",
+                "pause_status": SCHEDULE_PAUSE_STATUS,
             },
             "max_concurrent_runs": 1,
             "timeout_seconds": 3600,
@@ -196,7 +209,7 @@ def build_job_definitions(host: str) -> list[dict[str, Any]]:
             "schedule": {
                 "quartz_cron_expression": "0 30 5 * * ?",
                 "timezone_id": TIMEZONE,
-                "pause_status": "PAUSED",
+                "pause_status": SCHEDULE_PAUSE_STATUS,
             },
             "max_concurrent_runs": 1,
             "timeout_seconds": 900,
@@ -236,7 +249,11 @@ def main() -> int:
 
     print(
         json.dumps(
-            {"jobs": results, "schedules": "all PAUSED - see docs/jobs-and-scheduling.md"}, indent=2
+            {
+                "jobs": results,
+                "schedules": f"all {SCHEDULE_PAUSE_STATUS} - see docs/jobs-and-scheduling.md",
+            },
+            indent=2,
         )
     )
     return 0
