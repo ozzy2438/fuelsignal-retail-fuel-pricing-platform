@@ -29,12 +29,25 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, f1_score, precision_score, recall_score
 
+
+def _find_project_root() -> Path:
+    """Walk up from the current directory looking for pyproject.toml - robust to
+    whatever directory Databricks' git_source spark_python_task execution happens
+    to set as cwd (live-verified 2026-07-18: it's the script's own containing
+    directory, e.g. .../scripts, not the repo root - Path.cwd() alone is wrong)."""
+    candidate = Path.cwd()
+    for _ in range(5):
+        if (candidate / "pyproject.toml").exists():
+            return candidate
+        candidate = candidate.parent
+    return Path.cwd()
+
+
 try:
     PROJECT_ROOT = Path(__file__).resolve().parents[1]
 except NameError:
-    # Databricks git_source spark_python_task executes via an exec-style context
-    # where __file__ is undefined - the working directory is the repo checkout root.
-    PROJECT_ROOT = Path.cwd()
+    # __file__ is undefined under Databricks git_source exec-style execution.
+    PROJECT_ROOT = _find_project_root()
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from deploy_databricks_foundation import DatabricksSqlClient, DeploymentError  # noqa: E402

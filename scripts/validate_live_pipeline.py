@@ -6,12 +6,25 @@ import json
 import sys
 from pathlib import Path
 
+
+def _find_project_root() -> Path:
+    """Walk up from the current directory looking for pyproject.toml - robust to
+    whatever directory Databricks' git_source spark_python_task execution happens
+    to set as cwd (live-verified 2026-07-18: it's the script's own containing
+    directory, e.g. .../scripts, not the repo root - Path.cwd() alone is wrong)."""
+    candidate = Path.cwd()
+    for _ in range(5):
+        if (candidate / "pyproject.toml").exists():
+            return candidate
+        candidate = candidate.parent
+    return Path.cwd()
+
+
 try:
     SCRIPTS_DIR = Path(__file__).resolve().parent
 except NameError:
-    # Databricks git_source spark_python_task executes via an exec-style context
-    # where __file__ is undefined - the working directory is the repo checkout root.
-    SCRIPTS_DIR = Path.cwd() / "scripts"
+    # __file__ is undefined under Databricks git_source exec-style execution.
+    SCRIPTS_DIR = _find_project_root() / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from deploy_databricks_foundation import DatabricksSqlClient  # noqa: E402
