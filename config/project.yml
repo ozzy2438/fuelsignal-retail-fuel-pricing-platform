@@ -39,9 +39,17 @@ pricing:
   tgp_plausible_max_cpl: 250.0
 
 jump_detection:
-  # Price jump = increase of at least this many cpl from previous day median
-  min_jump_cpl: 5.0
-  # Alternative: percentage-based
+  # Price jump = increase of at least this many cpl from the previous day's market
+  # median (fuel_type-level, statewide). Empirically chosen 2026-07-18 via sensitivity
+  # analysis over the live 18-month archive (candidates 3/5/7/10/15 cpl) - 7.0 cpl gives
+  # a sparse, distinct event rate (~6-8% of days across U91/E10/P98/P95) with median
+  # triggered magnitude ~10-11 cpl, clearly separated from day-to-day noise
+  # (stddev ~5.2 cpl). See docs/jump-label-definition.md for the full sensitivity table
+  # and reasoning. Previous default (5.0) is now the "candidates" list's floor, not the
+  # chosen threshold.
+  min_jump_cpl: 7.0
+  candidate_jump_thresholds_cpl: [3.0, 5.0, 7.0, 10.0, 15.0]
+  # Alternative: percentage-based (not currently used by the Gold pipeline)
   min_jump_pct: 3.0
   # Forecast horizon in hours
   forecast_horizon_hours: 48

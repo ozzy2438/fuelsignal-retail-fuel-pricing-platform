@@ -181,13 +181,15 @@ make lint
 | AIP TGP ingestion | ✅ Complete (single download already covers 2004-present) |
 | Station identity crosswalk (address+postcode) | ✅ Complete - see docs/data-quality.md |
 | Silver transformations (fuel prices, station master) | ✅ Complete |
-| Gold SQL window functions | ⚠️ Defined, not yet executed against populated Silver |
+| Gold SQL window functions | ✅ Complete - executed live, see docs/feature-engineering.md |
 | Competitor geospatial (5km Haversine) | ✅ Complete |
+| Price-jump label definition + sensitivity analysis | ✅ Complete - see docs/jump-label-definition.md |
+| Gold-layer leakage controls | ✅ Complete - see docs/validation-methodology.md |
 | Data quality framework | ✅ Complete |
-| Unit tests | ✅ Complete |
+| Unit tests | ✅ Complete (102 tests) |
 | CI/CD pipeline | ✅ Complete |
 | Documentation | ✅ Complete |
-| ML models | ❌ Not started (requires data foundation) |
+| ML models | ❌ Not started (Gold feature layer now ready) |
 | Walk-forward backtest | ❌ Not started |
 | Power BI integration | ❌ Not started |
 
@@ -213,14 +215,25 @@ Week 1 (Foundation) is complete: station coordinates resolved, 18-month historic
 FuelCheck archive ingested (Jan 2025 - Jun 2026, 1,423,296 bronze rows), station identity
 crosswalk built (3098 coordinate-bearing stations), `silver_fuel_prices` populated
 (1,197,046 rows, ~84% match rate), 51,579 competitor pairs computed within 5km,
-audit/monitoring/DQ tables populated. Week 2 (Modelling) has **not** started. Next:
+audit/monitoring/DQ tables populated.
 
-1. **Gold Materialization** — Execute window function queries (cycle features,
-   competitor positioning, indicative margin) against the now-populated Silver layer
-2. **Feature Store** — Register features for ML consumption
-3. **ML Model v1** — Binary classifier for 48-hour jump probability, LightGBM vs a
-   rule-based baseline
-4. **Walk-forward Backtest** — 6-month out-of-sample validation
+Week 2 Phase 1 (Gold feature layer) is complete: all six Gold tables populated live
+(`gold_station_daily_market`/`gold_market_cycle_features`/`gold_indicative_margin`/
+`gold_daily_pricing_inputs`: 879,486 rows each; `gold_competitor_positioning`:
+6,961,790; `gold_price_jump_labels`: 3,536), price-jump threshold empirically chosen
+(7.0 cpl, see docs/jump-label-definition.md), leakage controls verified (0 duplicate
+keys, no lookahead in any feature column, Python/SQL cross-check agrees at every
+candidate threshold). See docs/feature-engineering.md and docs/data-quality.md for the
+full live results. Week 2 Phase 2 (Modelling) has **not** started. Next:
+
+1. **Rule-based baseline** — codify the "reprice same-day if a jump is detected"
+   heuristic against `gold_price_jump_labels` as the comparison point for the ML model
+2. **ML Model v1** — Binary classifier for 48-hour jump probability, LightGBM vs the
+   rule-based baseline, trained on `gold_daily_pricing_inputs` joined to
+   `gold_price_jump_labels`
+3. **7-day price-level forecast** — using `gold_market_cycle_features`
+4. **Walk-forward Backtest** — 6-month out-of-sample validation (methodology already
+   documented in docs/validation-methodology.md, not yet executed)
 5. **Recommendation Engine** — HOLD/FOLLOW/LEAD decision layer
 6. **Scheduling** — Databricks Jobs for daily automation
 7. **Power BI** — Reporting dashboard connected to Gold layer

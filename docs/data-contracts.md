@@ -93,35 +93,77 @@ for each table in the FuelSignal platform.
 
 ## Gold Layer
 
-### gold_daily_pricing_inputs
-- **Grain**: One row per `station_id` per `fuel_type` per `market_date`
-- **Primary Key**: (`station_id`, `fuel_type`, `market_date`)
-- **Contains**: All features needed for ML model input
-- **Limitations**:
-  - `days_since_last_jump` depends on jump detection definition (>= 5 cpl increase)
-  - Jump detection has NOT been formally validated against ACCC definitions yet
-  - Margin requires TGP data to be available for the matching date/city
+Built and live-validated 2026-07-18 by `scripts/run_gold_pipeline.py`. Full grain,
+join-rule, and leakage-control documentation: `feature-engineering.md`. Jump-threshold
+methodology: `jump-label-definition.md`. Gold is a **fully-derived** layer - every run
+drops and rebuilds all six tables from Silver (see `feature-engineering.md` §9); there
+is no incremental merge here the way there is for Bronze/Silver.
+
+### gold_station_daily_market
+- **Grain**: `station_id × fuel_type × market_date`. **Primary key**: same three columns.
+- **Contains**: Daily open/close/min/max price + observation count (see
+  `feature-engineering.md` §3 for the "final valid observation = close price" rule),
+  statewide market median, and aggregate local (5km) competitor stats.
+- **Live volume (2026-07-18)**: 879,486 rows, 2180 stations, 9 fuel types, 2025-01-01
+  to 2026-06-30, 0 duplicate keys. 86.05% of rows have same-day competitor coverage.
 
 ### gold_market_cycle_features
-- **Window Functions Used**:
-  - `MIN/MAX/AVG OVER (ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)` for 7-day rolling
-  - `LAG(price, 14)` for 14-day change
-  - `STDDEV OVER (ROWS 13 PRECEDING)` for volatility
-  - `SUM(is_jump) ... ROWS UNBOUNDED PRECEDING` for jump group tracking
-  - `ROW_NUMBER() OVER (PARTITION BY jump_group)` for days-since-jump
+- **Grain**: `station_id × fuel_type × market_date`.
+- **Window functions used**: `MIN/MAX/AVG/STDDEV(...) OVER (ROWS BETWEEN 6/13
+  PRECEDING AND CURRENT ROW)` for 7d/14d rolling stats; `LAG(price, 14)` for 14-day
+  change; `MAX(date_flag) OVER (ROWS UNBOUNDED PRECEDING)` for days-since-local-minimum
+  and days-since-own-jump (a running-carry-forward pattern, not `ROW_NUMBER() OVER
+  (PARTITION BY jump_group)` as in the original scaffold - the jump_group approach
+  breaks for `days_since_local_minimum`, which is not a partition-resetting event).
+- **Live volume**: 879,486 rows, 0 duplicate keys. 10,139 rows (1.15%) show
+  `|rolling_14d_price_change_cpl| > 100` cpl - see `feature-engineering.md` §7 for the
+  root cause (sparse, low-observation-count stations, not a pipeline bug).
+- **Limitations**: rolling windows are based on each station's own observation
+  sequence, not strict calendar days, when a station has reporting gaps.
 
 ### gold_indicative_margin
-- **Calculation**: `retail_price_cpl - tgp_cpl`
-- **Important**: This is an INDICATIVE margin only
-- **Missing**: Transport costs, operating costs, franchise fees, volume discounts
-- **Limitation**: Not a true P&L margin
+- **Grain**: `station_id × fuel_type × market_date`.
+- **Calculation**: `indicative_margin_cpl = daily_close_price_cpl - tgp_cpl` (ASOF-joined
+  TGP); `price_tgp_spread_cpl` uses the same formula but an exact-same-day-only TGP match.
+- **Live volume**: 879,486 rows, 0 duplicate keys. 28.87% have a non-null `tgp_cpl`
+  (U91 + DL only - TGP has no other fuel-type coverage). 24 rows (0.0027%) have a
+  margin outside `[-50, 100]` cpl. Margin range: -164.8 to 133.2 cpl, mean 16.3 cpl.
+- **Important**: This is an INDICATIVE margin only.
+- **Missing**: Transport costs, operating costs, franchise fees, volume discounts.
+- **Limitation**: Not a true P&L margin - never describe it as realised profit.
+
+### gold_competitor_positioning
+- **Grain**: `station_id × fuel_type × market_date × competitor_station_id` (detailed
+  per-pair drill-down; the aggregate competitor stats live on
+  `gold_station_daily_market` instead - see `feature-engineering.md` §4).
+- **Live volume**: 6,961,790 rows.
+
+### gold_daily_pricing_inputs
+- **Grain**: `station_id × fuel_type × market_date`. **Contains**: FEATURES only, no
+  labels - combines `gold_station_daily_market` + `gold_market_cycle_features` +
+  `gold_indicative_margin`.
+- **Live volume**: 879,486 rows, 0 duplicate keys, fully joinable to
+  `gold_price_jump_labels` on `(fuel_type, market_date)` (879,486/879,486 rows match).
+
+### gold_price_jump_labels
+- **Grain**: `fuel_type × market_date` (market-wide, **not** per-station - see
+  `jump-label-definition.md`). **Contains**: TARGET columns only
+  (`jump_today`/`jump_within_24h`/`jump_within_48h`) - `jump_within_24h`/`48h` use
+  future information by design and must never be joined into a feature table.
+- **Live volume**: 3,536 rows. Threshold: 7.0 cpl (empirically chosen - see
+  `jump-label-definition.md` for the full sensitivity table across 3/5/7/10/15 cpl
+  candidates and all nine fuel types).
 
 ---
 
 ## Known Limitations
 
-1. Price jump detection uses a simple threshold (>= 5 cpl daily increase)
+1. Price jump label threshold is 7.0 cpl (empirically chosen from a 3/5/7/10/15 cpl
+   sensitivity sweep - not formally validated against ACCC's own cycle definitions)
 2. Competitor radius is fixed at 5km; real competition may vary
-3. TGP matching uses Sydney terminal; regional stations may have different wholesale costs
+3. TGP matching uses Sydney terminal for all NSW stations; regional stations may have
+   different wholesale costs; only U91/DL have any TGP coverage at all
 4. No adjustment for fuel type cross-subsidisation
 5. Holiday effect is binary; doesn't account for holiday proximity
+6. LPG/E85/B20 jump-label frequencies are unstable due to thin underlying price history
+   (2,363 / 401 / 8 raw Silver rows respectively) - not reliable targets yet

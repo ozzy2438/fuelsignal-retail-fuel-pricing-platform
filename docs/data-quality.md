@@ -52,6 +52,28 @@ address text is far more stable.
 | station_unmatched_no_coordinates (bulk station has no official counterpart at all) | Error | Quarantine to `silver_data_quality_issues` - no coordinates are fabricated |
 | latitude/longitude NOT NULL | Error | Enforced by table schema - unmatched stations simply do not get a row |
 
+### Gold Layer
+
+Gold DQ metrics are computed live on every `scripts/run_gold_pipeline.py` run and
+written to `monitoring_data_quality_results` (severity `info` - these are reported
+metrics, not quarantine actions, since Gold is a fully-derived layer rebuilt from
+Silver on every run rather than an append-only quarantine target). Full methodology:
+`validation-methodology.md`; full root-cause analysis: `feature-engineering.md` §7.
+
+| Metric | Live result (2026-07-18) |
+|---|---|
+| Row count (6 tables) | `gold_station_daily_market`/`gold_market_cycle_features`/`gold_indicative_margin`/`gold_daily_pricing_inputs`: 879,486 each; `gold_competitor_positioning`: 6,961,790; `gold_price_jump_labels`: 3,536 |
+| Date range | 2025-01-01 to 2026-06-30 |
+| Distinct stations / fuel types | 2,180 / 9 |
+| Duplicate business keys (all 5 keyed tables) | 0 |
+| % rows with valid TGP | 28.87% (U91 + DL only, by construction - see data-sources.md) |
+| % rows with competitor coverage | 86.05% |
+| Implausible margin (outside [-50, 100] cpl) | 24 rows (0.0027%) - reported as both percentage and raw count so a rare issue can't round away to an invisible 0.00% |
+| Extreme 14-day price change (>100 cpl) | 10,139 rows (1.15%) - traced to low-observation-count stations, see feature-engineering.md §7 |
+| Station/fuel_type pairs with <14 days history | 603 |
+| Leakage self-check | `feature_methods_use_only_preceding_or_lag = true`, 0 violations |
+| Python/SQL jump-threshold cross-check | Agreed exactly at all 5 candidate thresholds (3/5/7/10/15 cpl) |
+
 ## Freshness Monitoring
 
 | Source | Max Stale (hours) | Alert Threshold |

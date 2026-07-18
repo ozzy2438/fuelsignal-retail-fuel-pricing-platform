@@ -33,6 +33,9 @@ deploy-foundation: ## Create Databricks catalog, schemas, and Delta tables
 ingest: ## Download official sources and populate existing Bronze/Silver tables
 	python scripts/run_ingestion_pipeline.py
 
+gold: ## Rebuild the Gold analytical feature layer from the populated Silver layer
+	python scripts/run_gold_pipeline.py
+
 clean: ## Remove build artifacts
 	rm -rf build/ dist/ *.egg-info
 	find . -type d -name __pycache__ -exec rm -rf {} +

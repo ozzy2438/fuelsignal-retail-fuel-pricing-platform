@@ -4,7 +4,7 @@
 
 1. **Price cycles exist and are detectable** — Based on ACCC published research confirming regular cycles in Australian capital city markets
 
-2. **5 cpl threshold for jump detection** — A price increase of ≥5 cpl in a single day is classified as a "jump". This threshold is configurable but has not been formally validated
+2. **7 cpl threshold for jump detection** — A market median price increase of ≥7 cpl in a single day is classified as a "jump". Empirically chosen 2026-07-18 via a sensitivity sweep across 3/5/7/10/15 cpl candidates over the live 18-month archive (previously an unvalidated 5 cpl default) — see docs/jump-label-definition.md for the full sensitivity table and reasoning. Still configurable; not formally validated against ACCC's own cycle methodology
 
 3. **5km competitor radius** — Stations within 5km are considered direct competitors. This is a simplification; actual competition depends on traffic patterns, road networks, and brand loyalty
 
