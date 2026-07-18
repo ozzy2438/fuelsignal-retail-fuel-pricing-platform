@@ -1,6 +1,7 @@
 """Tests for FuelCheck station identity matching helpers."""
 
 import pytest
+
 from fuelsignal.silver.station_matching import (
     names_agree,
     normalize_address_key,
