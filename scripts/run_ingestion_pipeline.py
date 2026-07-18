@@ -1261,4 +1261,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    _exit_code = main()
+    if _exit_code != 0:
+        # Databricks' git_source spark_python_task execution (an exec-style,
+        # non-notebook context) treats *any* raised SystemExit - even SystemExit(0)
+        # - as a task failure (live-verified 2026-07-18: a script that printed a
+        # full success summary and returned 0 was still marked FAILED). Only raise
+        # on a genuine non-zero exit code.
+        raise SystemExit(_exit_code)
