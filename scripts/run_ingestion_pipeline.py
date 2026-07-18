@@ -108,14 +108,16 @@ def fetch_required(url: str, timeout: int, retries: int) -> tuple[bytes, float]:
     raise RuntimeError(f"Required source unavailable: {url}: {last_error}") from last_error
 
 
+JOB_SECRET_SCOPE = "fuelsignal"  # noqa: S105 - a secret *scope name*, not a secret
+JOB_SECRET_KEY = "token"  # noqa: S105 - a secret *key name*, not a secret
+
+
 def _cli_credential(flag: str) -> str | None:
     """Read a `--flag value` pair from sys.argv - Databricks Jobs' serverless
     spark_python_task does not reliably inject `spark_env_vars` into the process
     environment (live-verified 2026-07-18: DATABRICKS_HOST/TOKEN were empty inside
-    the task despite being set on the task definition), so job parameters
-    (`spark_python_task.parameters`, which Databricks does substitute
-    `{{secrets/scope/key}}` templates into) are the reliable channel for scheduled
-    runs. Local/CLI execution never passes these flags, so this is a no-op there."""
+    the task despite being set on the task definition). Local/CLI execution never
+    passes these flags, so this is a no-op there."""
     argv = sys.argv[1:]
     if flag in argv:
         idx = argv.index(flag)
@@ -124,13 +126,41 @@ def _cli_credential(flag: str) -> str | None:
     return None
 
 
+def _dbutils_secret(scope: str, key: str) -> str | None:
+    """Retrieve a secret via the Databricks Runtime's dbutils - the documented,
+    reliable way to read a secret from inside a running job (works for both
+    classic-cluster and serverless compute), used as the fallback after
+    `{{secrets/scope/key}}` job-parameter templating was live-verified
+    (2026-07-18) to NOT resolve for `spark_python_task.parameters` on this
+    workspace (the literal, unsubstituted template string was received, causing
+    an HTTP 401 "Credential was not sent"). Returns None outside a Databricks
+    runtime (e.g. local execution) rather than raising."""
+    try:
+        from databricks.sdk.runtime import dbutils
+    except ImportError:
+        return None
+    try:
+        return dbutils.secrets.get(scope=scope, key=key)
+    except Exception:
+        return None
+
+
 def databricks_auth() -> tuple[str, str]:
     """Load PAT environment variables, CLI-provided credentials (see
-    `_cli_credential`), or a short-lived Databricks CLI OAuth token, in that order."""
+    `_cli_credential`), a Databricks Runtime secret (see `_dbutils_secret`), or a
+    short-lived Databricks CLI OAuth token, in that order."""
     host = os.environ.get("DATABRICKS_HOST", "").strip() or _cli_credential("--databricks-host")
     token = os.environ.get("DATABRICKS_TOKEN", "").strip() or _cli_credential("--databricks-token")
+    if token and token.startswith("{{"):
+        # An unsubstituted {{secrets/...}} template string, not a real credential.
+        token = None
     if host and token:
         return host.rstrip("/"), token
+
+    if host:
+        dbutils_token = _dbutils_secret(JOB_SECRET_SCOPE, JOB_SECRET_KEY)
+        if dbutils_token:
+            return host.rstrip("/"), dbutils_token
 
     profile = os.environ.get("DATABRICKS_CONFIG_PROFILE", "fuelsignal")
     cli = Path.home() / ".local" / "bin" / "databricks"

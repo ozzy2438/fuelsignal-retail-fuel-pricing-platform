@@ -78,6 +78,11 @@ BASE_DEPS = [
     "numpy>=1.24.0",
     "openpyxl>=3.1.0",
     "lxml>=5.0.0",
+    # databricks.sdk.runtime.dbutils is the fallback credential channel
+    # (databricks_auth's _dbutils_secret) - usually preinstalled in the Databricks
+    # Runtime image, pinned explicitly here so the job environment doesn't depend
+    # on that assumption.
+    "databricks-sdk>=0.20.0",
 ]
 ML_DEPS = [*BASE_DEPS, "lightgbm>=4.0.0", "scikit-learn>=1.3.0", "mlflow>=2.10.0"]
 
