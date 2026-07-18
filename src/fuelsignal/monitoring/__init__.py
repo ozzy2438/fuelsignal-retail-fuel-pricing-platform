@@ -72,6 +72,7 @@ MONITORING_SCHEMAS = {
             market_date DATE NOT NULL,
             policy_mode STRING,
             action STRING NOT NULL,
+            recommendation_status STRING,
             reason STRING,
             guardrail_triggered BOOLEAN,
             jump_signal_used BOOLEAN,
@@ -117,6 +118,9 @@ MONITORING_SCHEMAS = {
             stale_price_days_baseline LONG,
             days_priced_above_competitors_actual LONG,
             days_priced_above_competitors_unaddressed LONG,
+            automated_status_count LONG,
+            watch_only_status_count LONG,
+            disabled_unsafe_status_count LONG,
             avg_margin_difference_cpl DOUBLE,
             total_margin_difference_cpl DOUBLE,
             jump_signal_contribution_count LONG,
@@ -135,9 +139,103 @@ MONITORING_SCHEMAS = {
             'quality' = 'monitoring'
         )
     """,
+    "monitoring_fuel_policy_status": """
+        CREATE TABLE IF NOT EXISTS {schema}.monitoring_fuel_policy_status (
+            fuel_type STRING NOT NULL,
+            jump_model_eligible BOOLEAN NOT NULL,
+            calibrated_threshold DOUBLE,
+            tgp_margin_guardrail_valid BOOLEAN NOT NULL,
+            lead_enabled BOOLEAN NOT NULL,
+            follow_automation_status STRING NOT NULL,
+            policy_notes STRING,
+            effective_date DATE NOT NULL,
+            code_version STRING,
+            _pipeline_run_id STRING
+        )
+        USING DELTA
+        COMMENT 'Per-fuel-type automation config - dashboard source of truth'
+        TBLPROPERTIES (
+            'delta.autoOptimize.optimizeWrite' = 'true',
+            'quality' = 'monitoring'
+        )
+    """,
+}
+
+
+DASHBOARD_VIEWS = {
+    "monitoring_pricing_dashboard": """
+        CREATE OR REPLACE VIEW {monitoring_schema}.monitoring_pricing_dashboard AS
+        SELECT
+            r.backtest_run_id,
+            r.station_id,
+            s.station_name,
+            s.brand,
+            s.suburb,
+            s.postcode,
+            s.latitude,
+            s.longitude,
+            r.fuel_type,
+            r.market_date,
+            r.policy_mode,
+            r.action,
+            r.recommendation_status,
+            r.reason,
+            r.guardrail_triggered,
+            r.jump_signal_used,
+            r.forecast_signal_used,
+            r.jump_probability,
+            r.jump_threshold,
+            r.forecast_3d_change_cpl,
+            r.forecast_7d_change_cpl,
+            r.station_vs_competitor_median_cpl,
+            r.current_price_cpl,
+            r.tgp_cpl,
+            r.actual_indicative_margin_cpl,
+            r.hypothetical_price_cpl,
+            r.hypothetical_margin_cpl,
+            r.margin_difference_cpl,
+            r.days_since_price_change,
+            r.is_stale_actual,
+            r.priced_above_competitors_actual,
+            CASE
+                WHEN r.recommendation_status = 'disabled_unsafe' THEN
+                    'No validated TGP margin guardrail exists for ' || r.fuel_type ||
+                    ' - shown for visibility only, do not act on it automatically.'
+                WHEN r.recommendation_status = 'watch_only' THEN
+                    r.fuel_type || ' is in watch-only mode (jump signal not reliable enough for ' ||
+                    'automation, or awaiting a validated margin guardrail) - treat as advisory.'
+                ELSE NULL
+            END AS warning_message
+        FROM {monitoring_schema}.monitoring_pricing_policy_recommendations r
+        LEFT JOIN {silver_schema}.silver_station_master s ON r.station_id = s.station_id
+    """,
+    "monitoring_pricing_dashboard_automated": """
+        CREATE OR REPLACE VIEW {monitoring_schema}.monitoring_pricing_dashboard_automated AS
+        SELECT * FROM {monitoring_schema}.monitoring_pricing_dashboard
+        WHERE recommendation_status = 'automated'
+    """,
+    "monitoring_pricing_dashboard_watch_only": """
+        CREATE OR REPLACE VIEW {monitoring_schema}.monitoring_pricing_dashboard_watch_only AS
+        SELECT * FROM {monitoring_schema}.monitoring_pricing_dashboard
+        WHERE recommendation_status = 'watch_only'
+    """,
+    "monitoring_pricing_dashboard_disabled_unsafe": """
+        CREATE OR REPLACE VIEW {monitoring_schema}.monitoring_pricing_dashboard_disabled_unsafe AS
+        SELECT * FROM {monitoring_schema}.monitoring_pricing_dashboard
+        WHERE recommendation_status = 'disabled_unsafe'
+    """,
 }
 
 
 def get_monitoring_ddl(schema: str) -> dict[str, str]:
     """Get all Monitoring DDL statements with schema name applied."""
     return {name: ddl.format(schema=schema) for name, ddl in MONITORING_SCHEMAS.items()}
+
+
+def get_dashboard_view_ddl(monitoring_schema: str, silver_schema: str) -> dict[str, str]:
+    """Get dashboard view DDL - views, not tables, so they always reflect the latest
+    monitoring_pricing_policy_recommendations data with no separate population step."""
+    return {
+        name: ddl.format(monitoring_schema=monitoring_schema, silver_schema=silver_schema)
+        for name, ddl in DASHBOARD_VIEWS.items()
+    }

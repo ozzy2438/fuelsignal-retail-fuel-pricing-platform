@@ -3,24 +3,26 @@
   "backtest_start_date": "2025-12-27",
   "jump_model_id": "m-8afad3aa473649f3b4de14a939de11f3",
   "jump_model_source_run_id": "b3e80d2cea3544768901c260b48188cf",
-  "mlflow_run_id": "9a660be77e5f4e24a0749e270bc5b3d8",
+  "mlflow_run_id": "519233c8d9fa4d3695d633c76d7ec8d5",
   "model_train_end_date": "2025-12-26",
   "row_counts": {
     "recommendations_written": 398474,
     "summary_rows_written": 7
   },
-  "run_id": "policy-backtest-20260718T090118Z",
+  "run_id": "policy-backtest-20260718T110520Z",
   "summaries": [
     {
-      "avg_margin_difference_cpl": -11.03869892429606,
+      "automated_status_count": 31554,
+      "avg_margin_difference_cpl": -10.590363201810085,
       "baseline_hold_count": 31554,
       "days_priced_above_competitors_actual": 5607,
-      "days_priced_above_competitors_unaddressed": 48,
-      "follow_count": 24996,
+      "days_priced_above_competitors_unaddressed": 77,
+      "disabled_unsafe_status_count": 0,
+      "follow_count": 24792,
       "forecast_signal_contribution_count": 25629,
       "fuel_type": "DL",
-      "guardrail_intervention_count": 14975,
-      "hold_count": 5889,
+      "guardrail_intervention_count": 15528,
+      "hold_count": 6093,
       "jump_signal_contribution_count": 1777,
       "lead_count": 669,
       "lead_hit_rate": 0.3004484304932735,
@@ -28,14 +30,17 @@
       "policy_mode": "automated",
       "row_count": 31554,
       "stale_price_days_baseline": 407,
-      "stale_price_days_policy": 206,
-      "total_margin_difference_cpl": -348315.1058572379
+      "stale_price_days_policy": 216,
+      "total_margin_difference_cpl": -334168.3204699154,
+      "watch_only_status_count": 0
     },
     {
+      "automated_status_count": 38914,
       "avg_margin_difference_cpl": null,
       "baseline_hold_count": 77414,
       "days_priced_above_competitors_actual": 14227,
       "days_priced_above_competitors_unaddressed": 0,
+      "disabled_unsafe_status_count": 38500,
       "follow_count": 38500,
       "forecast_signal_contribution_count": 42751,
       "fuel_type": "E10",
@@ -49,13 +54,16 @@
       "row_count": 77414,
       "stale_price_days_baseline": 746,
       "stale_price_days_policy": 511,
-      "total_margin_difference_cpl": null
+      "total_margin_difference_cpl": null,
+      "watch_only_status_count": 0
     },
     {
+      "automated_status_count": 0,
       "avg_margin_difference_cpl": null,
       "baseline_hold_count": 59998,
       "days_priced_above_competitors_actual": 11674,
       "days_priced_above_competitors_unaddressed": 0,
+      "disabled_unsafe_status_count": 29745,
       "follow_count": 29745,
       "forecast_signal_contribution_count": 27750,
       "fuel_type": "P95",
@@ -69,13 +77,16 @@
       "row_count": 59998,
       "stale_price_days_baseline": 233,
       "stale_price_days_policy": 227,
-      "total_margin_difference_cpl": null
+      "total_margin_difference_cpl": null,
+      "watch_only_status_count": 30253
     },
     {
+      "automated_status_count": 40265,
       "avg_margin_difference_cpl": null,
       "baseline_hold_count": 87939,
       "days_priced_above_competitors_actual": 19567,
       "days_priced_above_competitors_unaddressed": 0,
+      "disabled_unsafe_status_count": 47674,
       "follow_count": 47674,
       "forecast_signal_contribution_count": 42485,
       "fuel_type": "P98",
@@ -89,13 +100,16 @@
       "row_count": 87939,
       "stale_price_days_baseline": 457,
       "stale_price_days_policy": 297,
-      "total_margin_difference_cpl": null
+      "total_margin_difference_cpl": null,
+      "watch_only_status_count": 0
     },
     {
+      "automated_status_count": 14033,
       "avg_margin_difference_cpl": null,
       "baseline_hold_count": 56678,
       "days_priced_above_competitors_actual": 13541,
       "days_priced_above_competitors_unaddressed": 0,
+      "disabled_unsafe_status_count": 42645,
       "follow_count": 42645,
       "forecast_signal_contribution_count": 39553,
       "fuel_type": "PDL",
@@ -109,18 +123,21 @@
       "row_count": 56678,
       "stale_price_days_baseline": 622,
       "stale_price_days_policy": 419,
-      "total_margin_difference_cpl": null
+      "total_margin_difference_cpl": null,
+      "watch_only_status_count": 0
     },
     {
-      "avg_margin_difference_cpl": -5.661749238686733,
+      "automated_status_count": 0,
+      "avg_margin_difference_cpl": -5.435468153621574,
       "baseline_hold_count": 84891,
       "days_priced_above_competitors_actual": 15579,
-      "days_priced_above_competitors_unaddressed": 374,
-      "follow_count": 42329,
+      "days_priced_above_competitors_unaddressed": 491,
+      "disabled_unsafe_status_count": 0,
+      "follow_count": 41989,
       "forecast_signal_contribution_count": 46459,
       "fuel_type": "U91",
-      "guardrail_intervention_count": 19322,
-      "hold_count": 42562,
+      "guardrail_intervention_count": 21401,
+      "hold_count": 42902,
       "jump_signal_contribution_count": 0,
       "lead_count": 0,
       "lead_hit_rate": null,
@@ -129,18 +146,21 @@
       "row_count": 84891,
       "stale_price_days_baseline": 605,
       "stale_price_days_policy": 526,
-      "total_margin_difference_cpl": -480631.55462135543
+      "total_margin_difference_cpl": -461422.3270290891,
+      "watch_only_status_count": 84891
     },
     {
-      "avg_margin_difference_cpl": -7.1187827770929895,
+      "automated_status_count": 124766,
+      "avg_margin_difference_cpl": -6.832329833818582,
       "baseline_hold_count": 398474,
       "days_priced_above_competitors_actual": 80195,
-      "days_priced_above_competitors_unaddressed": 422,
-      "follow_count": 225889,
+      "days_priced_above_competitors_unaddressed": 568,
+      "disabled_unsafe_status_count": 158564,
+      "follow_count": 225345,
       "forecast_signal_contribution_count": 224627,
       "fuel_type": "ALL",
-      "guardrail_intervention_count": 34297,
-      "hold_count": 162316,
+      "guardrail_intervention_count": 36929,
+      "hold_count": 162860,
       "jump_signal_contribution_count": 33382,
       "lead_count": 10269,
       "lead_hit_rate": 0.22397507060083746,
@@ -148,8 +168,9 @@
       "policy_mode": "mixed",
       "row_count": 398474,
       "stale_price_days_baseline": 3070,
-      "stale_price_days_policy": 2186,
-      "total_margin_difference_cpl": -828946.6604785932
+      "stale_price_days_policy": 2196,
+      "total_margin_difference_cpl": -795590.6474990047,
+      "watch_only_status_count": 115144
     }
   ]
 }

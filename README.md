@@ -192,10 +192,12 @@ make lint
 | MLflow experiment tracking | ✅ Complete - `/Shared/fuelsignal-jump-model` on Databricks |
 | Per-fuel-type decision threshold calibration | ✅ Complete - see docs/threshold-calibration.md |
 | 7-day price-level forecast model | ✅ Complete (first iteration) - see docs/price-forecast.md |
-| Pricing policy (HOLD/FOLLOW/LEAD) | ✅ Complete (first iteration) - see docs/pricing-policy.md |
+| Pricing policy (HOLD/FOLLOW/LEAD) | ✅ Complete - three-way safety gate, see docs/pricing-policy.md |
 | Six-month walk-forward policy backtest | ✅ Complete - 398,474 rows, see docs/pricing-policy.md |
+| Dashboard-ready output tables/views | ✅ Complete - see docs/pricing-policy.md SS7 |
+| Databricks Jobs (daily pipeline + monitoring) | ⚠️ Deployed, schedule PAUSED - see docs/jobs-and-scheduling.md |
 | Data quality framework | ✅ Complete |
-| Unit tests | ✅ Complete (179 tests) |
+| Unit tests | ✅ Complete (183 tests) |
 | CI/CD pipeline | ✅ Complete |
 | Documentation | ✅ Complete |
 | Power BI integration | ❌ Not started |
@@ -213,18 +215,27 @@ make lint
    No commercial-impact claim.
 2. **TGP margin guardrail covers only DL and U91** — TGP (wholesale price) data only
    maps to those two fuel types (established in Phase 1); for E10/P95/P98/PDL, the
-   pricing policy's FOLLOW recommendation has no margin floor at all. See
-   docs/pricing-policy.md SS5 for the full detail - this is the single most important
-   caveat before any production use of the policy.
-3. **Station coverage is bounded by the live reference API's current snapshot** — a bulk
+   pricing policy's FOLLOW recommendation is explicitly `recommendation_status =
+   disabled_unsafe` (never automated) because there is no margin floor to protect it.
+   DL is the only fuel type with full automation on both LEAD and FOLLOW. A
+   retail-spread-based margin proxy was investigated for the other four fuel types
+   and deliberately not activated - no ground truth exists to validate it against
+   (docs/margin-proxy-investigation.md). See docs/pricing-policy.md SS4-5 for the full
+   detail - this is the single most important caveat before any production use.
+3. **Scheduled jobs exist but are paused pending a credential** — two Databricks Jobs
+   (daily pipeline + monitoring) are deployed with real cron schedules, but a
+   long-lived job-execution token was deliberately not created by the agent
+   (provisioning a new standing credential on a live account was left for a human -
+   see docs/jobs-and-scheduling.md for the exact activation steps).
+4. **Station coverage is bounded by the live reference API's current snapshot** — a bulk
    station that has closed/rebranded since the reference API was last queried, or whose
    address text formatting doesn't match, will not resolve to a coordinate and is
    quarantined rather than guessed (see docs/data-quality.md for exact rule names and
    counts)
-4. **AIP TGP** — Published as HTML/XLSX; extraction requires maintenance when page/workbook structure changes
-5. **No volume data** — Public sources don't include sales volume; margin analysis is indicative only
-6. **Single state** — Currently NSW only; architecture supports multi-state expansion
-7. **Free-tier Databricks** — Some Unity Catalog features may be limited; the SQL warehouse
+5. **AIP TGP** — Published as HTML/XLSX; extraction requires maintenance when page/workbook structure changes
+6. **No volume data** — Public sources don't include sales volume; margin analysis is indicative only
+7. **Single state** — Currently NSW only; architecture supports multi-state expansion
+8. **Free-tier Databricks** — Some Unity Catalog features may be limited; the SQL warehouse
    returned an unexplained `HTTP 403` mid-run once during a large historical backfill -
    idempotent per-file checksums mean a retry safely resumes rather than reprocessing
    everything
@@ -291,13 +302,34 @@ recommendations were followed by an actual jump at 1.7-2.9x the base rate across
 every automated fuel type. Full results: docs/pricing-policy.md. Tracked in
 `/Shared/fuelsignal-pricing-policy`. Config: `config/pricing_policy.yml`.
 
+Week 2 Phase 5 (Operationalisation) is complete: a three-way `recommendation_status`
+safety gate (`automated`/`watch_only`/`disabled_unsafe`) now sits alongside `action`
+on every recommendation - full automation requires *both* jump-model eligibility
+*and* a validated TGP margin guardrail, so E10/P98/PDL keep automated LEAD but their
+FOLLOW is `disabled_unsafe`, P95 is `disabled_unsafe` on both counts, and **DL is the
+only fuel type with full automation**. The margin guardrail floor was re-tuned from
+1.0 to 2.0 cpl (a grid sweep of the existing backtest data showed this improves DL's
+average margin difference by 0.45 cpl and U91's by 0.22 cpl for a negligible staleness
+cost). A retail-spread-based margin proxy for the four uncovered fuel types was
+investigated and explicitly **not activated** - no ground truth TGP data exists to
+validate it against (`docs/margin-proxy-investigation.md`). Four dashboard-ready views
+plus a `monitoring_fuel_policy_status` reference table were deployed
+(`docs/pricing-policy.md` §7). Two Databricks Jobs (`fuelsignal-daily-pipeline`,
+`fuelsignal-monitoring-checks`) were deployed live with real cron schedules, but left
+**PAUSED** - provisioning the long-lived credential the jobs need to authenticate was
+deliberately left for a human, not created unattended by the agent
+(`docs/jobs-and-scheduling.md` has the exact activation steps). Full results:
+docs/pricing-policy.md.
+
 **Still no commercial-impact claim anywhere in the repository.** Next:
 
-1. **Resolve the TGP coverage gap** — either accept it as a permanent limitation for
-   E10/P95/P98/PDL or find an alternative margin proxy for those four fuel types
-   before any production FOLLOW automation
-2. **Scheduling** — Databricks Jobs for daily automation
-3. **Power BI** — Reporting dashboard connected to Gold layer
+1. **Provision the job-execution credential and unpause the schedules** — the one
+   remaining step to make the daily pipeline actually run (docs/jobs-and-scheduling.md)
+2. **Resolve the TGP coverage gap** — either accept it as a permanent limitation for
+   E10/P95/P98/PDL or source real wholesale data for those four fuel types before any
+   production FOLLOW automation (docs/margin-proxy-investigation.md)
+3. **Power BI** — connect a report to the dashboard views/tables already deployed
+   (`docs/pricing-policy.md` §7)
 
 ## 📄 License
 

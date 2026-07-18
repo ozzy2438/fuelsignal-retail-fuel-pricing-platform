@@ -1,4 +1,4 @@
-"""Transparent HOLD / FOLLOW / LEAD pricing-policy decision rule (Week 2 Phase 4).
+"""Transparent HOLD / FOLLOW / LEAD pricing-policy decision rule (Week 2 Phase 4-5).
 
 One station-fuel-day in, one decision out - no learned parameters of its own. The
 policy composes four existing signals: the calibrated jump-model probability (only
@@ -14,19 +14,49 @@ Decision precedence, in order:
    probability clears its threshold AND the 3-day forecast confirms a rise of at
    least `lead_min_forecast_change_cpl` AND the station is not already priced above
    its local competitor median (leading from an already-uncompetitive position would
-   only make it worse).
+   only make it worse). LEAD only ever fires for automation-enabled fuel types, and
+   raising price cannot breach a margin floor, so a LEAD's `recommendation_status`
+   is always "automated".
 3. FOLLOW: triggered reactively once the station is priced at least
    `follow_min_overpriced_cpl` above the local competitor median, or proactively if
    the 3-day forecast predicts a decline of at least `follow_forecast_decline_cpl`.
    The TGP margin guardrail can cap how far a FOLLOW is allowed to cut price; if the
    capped price is not actually below the current price, the recommendation is
-   downgraded to HOLD rather than issuing a FOLLOW that doesn't move anything.
+   downgraded to HOLD rather than issuing a FOLLOW that doesn't move anything. A
+   price *cut* is the one action that can breach a margin floor, so FOLLOW's
+   `recommendation_status` depends on whether TGP data exists to guard it at all -
+   see `_recommendation_status` below.
 4. HOLD: the default when nothing above triggers.
+
+## Three-way `recommendation_status` (Week 2 Phase 5 - operationalisation safety gate)
+
+Every `PolicyDecision` carries a `recommendation_status` distinct from `action`,
+because "what the rule computed" and "what is safe to automatically act on" are not
+the same question:
+
+- **"automated"** - safe to surface as an automated recommendation. HOLD when the
+  fuel type has jump-model automation enabled; LEAD always (§2); FOLLOW only when
+  TGP data exists to guard the cut (today: DL only, among automated fuel types).
+- **"watch_only"** - informational, human-review-only. HOLD/FOLLOW for a fuel type
+  without jump-model automation (U91 - "kept in watch-only mode as already defined",
+  never LEAD) whenever TGP data *is* available to guard the FOLLOW.
+- **"disabled_unsafe"** - never present this as actionable. Any FOLLOW where TGP
+  data is unavailable (E10, P95, P98, PDL - confirmed live 2026-07-18, TGP is 100%
+  null for these four in the current archive) - there is no validated margin
+  guardrail to protect a price cut for these fuel types, full stop, regardless of
+  how reliable their jump signal is. The `action` field still reports what the raw
+  rule would recommend (never silently rewritten to HOLD) so the signal stays
+  visible and auditable - `recommendation_status` is what a dashboard or downstream
+  automation must gate on, not `action` alone.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+STATUS_AUTOMATED = "automated"
+STATUS_WATCH_ONLY = "watch_only"
+STATUS_DISABLED_UNSAFE = "disabled_unsafe"
 
 
 @dataclass(frozen=True)
@@ -58,11 +88,15 @@ class PolicyInputs:
 
 @dataclass(frozen=True)
 class PolicyDecision:
-    """The recommendation plus enough detail to explain and evaluate it."""
+    """The recommendation plus enough detail to explain, evaluate, and safely gate
+    it. `action` is the raw rule's output; `recommendation_status` is what a
+    dashboard or downstream automation must actually key off - see module
+    docstring."""
 
     action: str  # "HOLD" | "FOLLOW" | "LEAD"
     reason: str
-    mode: str  # "automated" | "watch_only"
+    mode: str  # "automated" | "watch_only" - the fuel type's jump-model automation setting
+    recommendation_status: str  # "automated" | "watch_only" | "disabled_unsafe"
     guardrail_triggered: bool
     jump_signal_used: bool
     forecast_signal_used: bool
@@ -70,14 +104,28 @@ class PolicyDecision:
     hypothetical_margin_cpl: float | None
 
 
+def _recommendation_status(action: str, automation_enabled: bool, has_margin_data: bool) -> str:
+    if action == "LEAD":
+        return STATUS_AUTOMATED
+    if action == "FOLLOW":
+        if not has_margin_data:
+            return STATUS_DISABLED_UNSAFE
+        return STATUS_AUTOMATED if automation_enabled else STATUS_WATCH_ONLY
+    return STATUS_AUTOMATED if automation_enabled else STATUS_WATCH_ONLY
+
+
 def decide_policy(inputs: PolicyInputs, params: PolicyParams) -> PolicyDecision:
     mode = "automated" if inputs.automation_enabled else "watch_only"
+    has_margin_data = inputs.tgp_cpl is not None
 
     if inputs.current_price_cpl is None:
         return PolicyDecision(
             action="HOLD",
             reason="insufficient_data",
             mode=mode,
+            recommendation_status=_recommendation_status(
+                "HOLD", inputs.automation_enabled, has_margin_data
+            ),
             guardrail_triggered=False,
             jump_signal_used=False,
             forecast_signal_used=False,
@@ -109,6 +157,9 @@ def decide_policy(inputs: PolicyInputs, params: PolicyParams) -> PolicyDecision:
             action="LEAD",
             reason="jump_signal_and_rising_forecast",
             mode=mode,
+            recommendation_status=_recommendation_status(
+                "LEAD", inputs.automation_enabled, has_margin_data
+            ),
             guardrail_triggered=False,
             jump_signal_used=True,
             forecast_signal_used=True,
@@ -117,12 +168,17 @@ def decide_policy(inputs: PolicyInputs, params: PolicyParams) -> PolicyDecision:
         )
 
     if priced_above_market or forecast_declining:
-        return _follow_decision(inputs, params, mode, priced_above_market, forecast_declining)
+        return _follow_decision(
+            inputs, params, mode, has_margin_data, priced_above_market, forecast_declining
+        )
 
     return PolicyDecision(
         action="HOLD",
         reason="no_trigger",
         mode=mode,
+        recommendation_status=_recommendation_status(
+            "HOLD", inputs.automation_enabled, has_margin_data
+        ),
         guardrail_triggered=False,
         jump_signal_used=jump_expected,
         forecast_signal_used=forecast_rising or forecast_declining,
@@ -135,6 +191,7 @@ def _follow_decision(
     inputs: PolicyInputs,
     params: PolicyParams,
     mode: str,
+    has_margin_data: bool,
     priced_above_market: bool,
     forecast_declining: bool,
 ) -> PolicyDecision:
@@ -159,6 +216,9 @@ def _follow_decision(
                     action="HOLD",
                     reason="margin_guardrail_blocked_follow",
                     mode=mode,
+                    recommendation_status=_recommendation_status(
+                        "HOLD", inputs.automation_enabled, has_margin_data
+                    ),
                     guardrail_triggered=True,
                     jump_signal_used=False,
                     forecast_signal_used=forecast_declining,
@@ -173,6 +233,9 @@ def _follow_decision(
         action="FOLLOW",
         reason=reason,
         mode=mode,
+        recommendation_status=_recommendation_status(
+            "FOLLOW", inputs.automation_enabled, has_margin_data
+        ),
         guardrail_triggered=guardrail_triggered,
         jump_signal_used=False,
         forecast_signal_used=forecast_declining,

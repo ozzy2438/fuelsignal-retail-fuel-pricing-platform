@@ -79,6 +79,15 @@ def summarize(recommendations: pd.DataFrame, fuel_type: str | None) -> dict[str,
         "days_priced_above_competitors_unaddressed": int(
             (frame["priced_above_competitors_actual"] & (frame["action"] != "FOLLOW")).sum()
         ),
+        # Three-way safety gate (Phase 5): "automated" only when both jump-model
+        # eligibility and a validated TGP margin guardrail are present;
+        # "disabled_unsafe" for any FOLLOW with no margin data to guard it (never
+        # silently converted to HOLD - the raw action stays visible in `action`).
+        "automated_status_count": int((frame["recommendation_status"] == "automated").sum()),
+        "watch_only_status_count": int((frame["recommendation_status"] == "watch_only").sum()),
+        "disabled_unsafe_status_count": int(
+            (frame["recommendation_status"] == "disabled_unsafe").sum()
+        ),
         # tgp_cpl (and therefore any margin figure) is only populated for DL/U91 -
         # established in Phase 1, confirmed again live for this window (2026-07-18):
         # E10/P95/P98/PDL have 0 non-null tgp_cpl rows. Report None, not a misleading

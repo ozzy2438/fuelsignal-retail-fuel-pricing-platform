@@ -1,4 +1,14 @@
-"""HOLD / FOLLOW / LEAD pricing-policy engine and six-month backtest (Week 2 Phase 4).
+"""HOLD / FOLLOW / LEAD pricing-policy engine and six-month backtest (Week 2 Phase 4-5).
+
+Phase 5 (operationalisation, 2026-07-18) adds a three-way `recommendation_status`
+safety gate (automated/watch_only/disabled_unsafe - see
+src/fuelsignal/policy/pricing_policy.py), re-tunes the TGP margin guardrail floor
+from 1.0 to 2.0 cpl (docs/pricing-policy.md SS8), and deploys the dashboard-ready
+views and the monitoring_fuel_policy_status reference table
+(deploy_dashboard_schema). Every re-run fully refreshes
+monitoring_pricing_policy_recommendations, monitoring_policy_backtest_summary and
+monitoring_fuel_policy_status (delete then insert) - these represent THE current
+backtest and policy configuration, not an accumulating multi-version log.
 
 Reuses, without retraining, the Phase 2 LightGBM jump classifier (looked up live from
 the `/Shared/fuelsignal-jump-model` MLflow experiment - the most recent
@@ -60,6 +70,7 @@ from train_jump_model import FEATURE_COLUMNS as JUMP_FEATURE_COLUMNS  # noqa: E4
 from train_jump_model import fetch_training_data  # noqa: E402
 
 from fuelsignal.config import load_env, load_project_config  # noqa: E402
+from fuelsignal.monitoring import get_dashboard_view_ddl, get_monitoring_ddl  # noqa: E402
 from fuelsignal.policy.backtest_metrics import (  # noqa: E402
     days_since_price_change_series,
     is_priced_above_competitors,
@@ -86,6 +97,7 @@ RECOMMENDATION_COLUMNS = [
     "market_date",
     "policy_mode",
     "action",
+    "recommendation_status",
     "reason",
     "guardrail_triggered",
     "jump_signal_used",
@@ -124,6 +136,9 @@ SUMMARY_COLUMNS = [
     "stale_price_days_baseline",
     "days_priced_above_competitors_actual",
     "days_priced_above_competitors_unaddressed",
+    "automated_status_count",
+    "watch_only_status_count",
+    "disabled_unsafe_status_count",
     "avg_margin_difference_cpl",
     "total_margin_difference_cpl",
     "jump_signal_contribution_count",
@@ -135,6 +150,63 @@ SUMMARY_COLUMNS = [
     "generated_at",
     "_pipeline_run_id",
 ]
+
+FUEL_POLICY_STATUS_TABLE = f"{MONITORING_SCHEMA}.monitoring_fuel_policy_status"
+FUEL_POLICY_STATUS_COLUMNS = [
+    "fuel_type",
+    "jump_model_eligible",
+    "calibrated_threshold",
+    "tgp_margin_guardrail_valid",
+    "lead_enabled",
+    "follow_automation_status",
+    "policy_notes",
+    "effective_date",
+    "code_version",
+    "_pipeline_run_id",
+]
+
+# Existing tables predate the recommendation_status / status-count columns (Phase 4
+# shipped without them) - CREATE TABLE IF NOT EXISTS is a no-op against an
+# already-existing table, so these columns need an explicit one-time migration.
+SCHEMA_MIGRATIONS = [
+    (
+        f"{MONITORING_SCHEMA}.monitoring_pricing_policy_recommendations",
+        "recommendation_status",
+        "STRING",
+    ),
+    (f"{MONITORING_SCHEMA}.monitoring_policy_backtest_summary", "automated_status_count", "LONG"),
+    (
+        f"{MONITORING_SCHEMA}.monitoring_policy_backtest_summary",
+        "watch_only_status_count",
+        "LONG",
+    ),
+    (
+        f"{MONITORING_SCHEMA}.monitoring_policy_backtest_summary",
+        "disabled_unsafe_status_count",
+        "LONG",
+    ),
+]
+
+
+def deploy_dashboard_schema(client: DatabricksSqlClient) -> None:
+    """Idempotently bring the monitoring schema up to date: migrate the two Phase 4
+    tables to add the Phase 5 status columns, create the new
+    monitoring_fuel_policy_status table if missing, and (re)create the four
+    dashboard views so they always reflect the latest column set."""
+    for table, column, col_type in SCHEMA_MIGRATIONS:
+        existing = client.execute(f"DESCRIBE TABLE {table}")
+        existing_columns = {row[0] for row in existing["result"]["data_array"]}
+        if column not in existing_columns:
+            client.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+            print(f"  migrated {table}: added {column} {col_type}", file=sys.stderr)
+
+    fuel_policy_status_ddl = get_monitoring_ddl(MONITORING_SCHEMA)["monitoring_fuel_policy_status"]
+    client.execute(fuel_policy_status_ddl)
+
+    silver_schema = f"{CATALOG}.{SCHEMA_PREFIX}_silver"
+    for view_name, ddl in get_dashboard_view_ddl(MONITORING_SCHEMA, silver_schema).items():
+        client.execute(ddl)
+        print(f"  deployed view {view_name}", file=sys.stderr)
 
 
 def find_phase2_jump_model(mlflow_client: MlflowClient) -> tuple[str, str, date]:
@@ -271,6 +343,7 @@ def build_recommendations(
                 "market_date": row.market_date,
                 "policy_mode": decision.mode,
                 "action": decision.action,
+                "recommendation_status": decision.recommendation_status,
                 "reason": decision.reason,
                 "guardrail_triggered": decision.guardrail_triggered,
                 "jump_signal_used": decision.jump_signal_used,
@@ -313,6 +386,9 @@ def main() -> int:
     mlflow.set_tracking_uri("databricks")
     mlflow.set_experiment("/Shared/fuelsignal-pricing-policy")
     mlflow_client = MlflowClient()
+
+    print("Deploying/migrating dashboard schema (idempotent)...", file=sys.stderr)
+    deploy_dashboard_schema(client)
 
     project_config = load_project_config()
     forecast_config = project_config["price_forecast"]
@@ -422,6 +498,12 @@ def main() -> int:
         recommendations["_pipeline_run_id"] = run_id
         recommendations["ingested_at"] = ingested_at
 
+        # This table represents THE current backtest, not a multi-version audit log -
+        # full refresh (delete then insert) rather than accumulating superseded rows
+        # from earlier policy versions across re-runs.
+        print(f"Clearing prior rows from {RECOMMENDATIONS_TABLE}...", file=sys.stderr)
+        client.execute(f"DELETE FROM {RECOMMENDATIONS_TABLE}")
+
         print(f"Writing {len(recommendations)} rows to {RECOMMENDATIONS_TABLE}...", file=sys.stderr)
         insert_rows(
             client,
@@ -451,7 +533,52 @@ def main() -> int:
             row["_pipeline_run_id"] = run_id
             summary_rows.append(row)
 
+        print(f"Clearing prior rows from {SUMMARY_TABLE}...", file=sys.stderr)
+        client.execute(f"DELETE FROM {SUMMARY_TABLE}")
         insert_rows(client, SUMMARY_TABLE, SUMMARY_COLUMNS, summary_rows, chunk_size=100)
+
+        print("Writing fuel policy status reference rows...", file=sys.stderr)
+        client.execute(f"DELETE FROM {FUEL_POLICY_STATUS_TABLE}")
+        summary_by_fuel = {s["fuel_type"]: s for s in summaries if s["fuel_type"] != "ALL"}
+        policy_status_rows = []
+        for fuel in all_fuel_types:
+            jump_eligible = fuel in automated
+            tgp_valid = bool(summary_by_fuel[fuel]["margin_data_available"])
+            follow_status = (
+                "disabled_unsafe"
+                if not tgp_valid
+                else ("automated" if jump_eligible else "watch_only")
+            )
+            notes = []
+            if not jump_eligible:
+                notes.append(
+                    "watch-only: jump-model threshold did not clear the Phase 3 business rule"
+                )
+            if not tgp_valid:
+                notes.append(
+                    "disabled_unsafe: no validated TGP margin guardrail (TGP data unavailable)"
+                )
+            policy_status_rows.append(
+                {
+                    "fuel_type": fuel,
+                    "jump_model_eligible": jump_eligible,
+                    "calibrated_threshold": thresholds.get(fuel),
+                    "tgp_margin_guardrail_valid": tgp_valid,
+                    "lead_enabled": jump_eligible,
+                    "follow_automation_status": follow_status,
+                    "policy_notes": "; ".join(notes) if notes else "fully automated",
+                    "effective_date": backtest_end,
+                    "code_version": git_commit_short(),
+                    "_pipeline_run_id": run_id,
+                }
+            )
+        insert_rows(
+            client,
+            FUEL_POLICY_STATUS_TABLE,
+            FUEL_POLICY_STATUS_COLUMNS,
+            policy_status_rows,
+            chunk_size=10,
+        )
 
         with mlflow.start_run(run_name=run_id) as parent_run:
             mlflow.log_params(
@@ -471,7 +598,7 @@ def main() -> int:
                     "code_version": git_commit_short(),
                 }
             )
-            mlflow.set_tags({"phase": "week2-phase4-pricing-policy"})
+            mlflow.set_tags({"phase": "week2-phase5-pricing-policy-operationalisation"})
             batched_metrics: dict[str, float] = {}
             for s in summaries:
                 prefix = s["fuel_type"]

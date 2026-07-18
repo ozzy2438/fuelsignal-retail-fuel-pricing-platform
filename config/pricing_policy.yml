@@ -1,4 +1,4 @@
-# FuelSignal Pricing Policy Configuration (Week 2 Phase 4, 2026-07-18)
+# FuelSignal Pricing Policy Configuration (Week 2 Phase 4-5, updated 2026-07-18)
 #
 # HOLD / FOLLOW / LEAD decision rules and their numeric thresholds. Every value below
 # is grounded in either a live empirical percentile from the Gold layer or a prior
@@ -6,6 +6,16 @@
 # and rationale of each number. This file is the single source of truth for the
 # policy engine (src/fuelsignal/policy/pricing_policy.py) and the backtest
 # (scripts/run_pricing_policy_backtest.py); do not hardcode these values elsewhere.
+#
+# Phase 5 (operationalisation) safety gate: full automation (LEAD and FOLLOW both
+# "automated" recommendation_status) requires BOTH jump-model eligibility (this
+# file's automated_fuel_types) AND a validated TGP margin guardrail (tgp_cpl
+# non-null - live-confirmed 2026-07-18: DL and U91 only). E10/P95/P98/PDL's FOLLOW
+# recommendations are "disabled_unsafe" - computed and visible, never automated -
+# until a validated margin proxy exists for them (docs/margin-proxy-investigation.md
+# investigates one; it is NOT activated here). See docs/pricing-policy.md SS4-5 and
+# src/fuelsignal/policy/pricing_policy.py's module docstring for the full three-way
+# recommendation_status rule.
 
 pricing_policy:
   # Jump-model automation is only trusted for the four fuel types whose calibrated
@@ -49,14 +59,23 @@ pricing_policy:
   follow_forecast_decline_cpl: 5.0
 
   # TGP-based minimum-margin guardrail: a FOLLOW is never allowed to push the
-  # indicative margin (retail - TGP) below this floor. Set to just above the live
-  # 10th percentile of gold_indicative_margin.indicative_margin_cpl (0.5 cpl,
-  # percentile_approx query 2026-07-18, 5th percentile is already negative at -2.7)
-  # - a small safety margin above the empirical trough, not an arbitrary number. When
-  # the guardrail caps a FOLLOW below the fully-competitive target price, and even
-  # the capped price is not below the current price, the recommendation is downgraded
-  # to HOLD rather than issuing a FOLLOW that doesn't actually move the price down.
-  min_margin_guardrail_cpl: 1.0
+  # indicative margin (retail - TGP) below this floor. When the guardrail caps a
+  # FOLLOW below the fully-competitive target price, and even the capped price is
+  # not below the current price, the recommendation is downgraded to HOLD rather
+  # than issuing a FOLLOW that doesn't actually move the price down.
+  #
+  # Re-tuned 2026-07-18 (Phase 5) from 1.0 to 2.0 cpl, using a grid sweep (0.0-5.0
+  # cpl step 0.5) of the *already-collected* Phase 4 backtest inputs for DL/U91
+  # re-scored through the unchanged decide_policy() rule - see
+  # docs/pricing-policy.md SS8 for the full table. Finding: raising the floor from
+  # 1.0 to 2.0 cpl improves DL's average margin difference from -11.04 to -10.59 cpl
+  # and U91's from -5.66 to -5.44 cpl, while stale-price-days-still-HOLD moves only
+  # 206->216 for DL (+0.03pp of 31,554 rows) and 526->526 for U91 (no measurable
+  # change) - a small, well-justified margin improvement for negligible extra
+  # staleness. Floors above ~3.0 cpl start costing measurably more staleness (DL
+  # reaches 249 stale days by floor=5.0) for diminishing margin gains, so 2.0 cpl
+  # sits in the efficient part of the tradeoff curve, not at either extreme.
+  min_margin_guardrail_cpl: 2.0
 
   # A station-day counts as "stale" once its actual observed price has gone unchanged
   # for at least this many consecutive days. One week is the same order of magnitude
