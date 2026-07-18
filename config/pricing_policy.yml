@@ -1,0 +1,80 @@
+# FuelSignal Pricing Policy Configuration (Week 2 Phase 4, 2026-07-18)
+#
+# HOLD / FOLLOW / LEAD decision rules and their numeric thresholds. Every value below
+# is grounded in either a live empirical percentile from the Gold layer or a prior
+# phase's measured model error - see docs/pricing-policy.md for the full derivation
+# and rationale of each number. This file is the single source of truth for the
+# policy engine (src/fuelsignal/policy/pricing_policy.py) and the backtest
+# (scripts/run_pricing_policy_backtest.py); do not hardcode these values elsewhere.
+
+pricing_policy:
+  # Jump-model automation is only trusted for the four fuel types whose calibrated
+  # threshold cleared the business-rule constraints in Phase 3
+  # (config/model_thresholds.yml, docs/threshold-calibration.md) - U91 and P95 both
+  # fell back to the shared 0.5 default there because no threshold satisfied recall,
+  # alert-fatigue AND lead-time simultaneously (their PR-AUC, ~0.12-0.13, is the
+  # model's weakest). Those two fuel types stay in conservative/watch mode: they can
+  # still receive FOLLOW/HOLD recommendations from competitor positioning and the
+  # price forecast (which performs comparably or better for U91/P95 than the other
+  # fuel types - see docs/price-forecast.md), but the jump-model can never trigger a
+  # LEAD recommendation for them.
+  automated_fuel_types: ["E10", "P98", "DL", "PDL"]
+  watch_only_fuel_types: ["U91", "P95"]
+
+  # LEAD requires the 3-day market forecast to predict a rise of at least this many
+  # cpl. Set to the LightGBM day-3 forecast's own typical error (MAE ranged 4.5-6.1
+  # cpl across fuel types at day 3, docs/price-forecast.md SS5b) - a forecast move
+  # smaller than the model's own noise floor is not a trustworthy basis for leading
+  # the market.
+  lead_min_forecast_change_cpl: 5.0
+
+  # A LEAD recommendation applies a modest anticipatory raise, not the full forecast
+  # move - real cyclical fuel pricing "leads" the market with a small test increment,
+  # not a jump to the predicted peak. Smaller than lead_min_forecast_change_cpl by
+  # design.
+  lead_step_cpl: 2.0
+
+  # FOLLOW triggers reactively once a station is priced this many cpl above its local
+  # competitor median. Set to the live 75th percentile of
+  # gold_station_daily_market.station_vs_competitor_median_cpl (+4.0 cpl,
+  # percentile_approx query 2026-07-18) - triggering at the top quartile of observed
+  # overpricing, not on any positive gap (half of all station-days sit at or below
+  # the competitor median already, per the same query's 50th percentile of 0.0 cpl).
+  follow_min_overpriced_cpl: 4.0
+
+  # FOLLOW can also trigger proactively, ahead of a station actually becoming
+  # overpriced, if the 3-day forecast predicts a decline of at least this many cpl.
+  # Same magnitude and rationale as lead_min_forecast_change_cpl - the forecast
+  # signal must clear its own typical day-3 error before being actioned.
+  follow_forecast_decline_cpl: 5.0
+
+  # TGP-based minimum-margin guardrail: a FOLLOW is never allowed to push the
+  # indicative margin (retail - TGP) below this floor. Set to just above the live
+  # 10th percentile of gold_indicative_margin.indicative_margin_cpl (0.5 cpl,
+  # percentile_approx query 2026-07-18, 5th percentile is already negative at -2.7)
+  # - a small safety margin above the empirical trough, not an arbitrary number. When
+  # the guardrail caps a FOLLOW below the fully-competitive target price, and even
+  # the capped price is not below the current price, the recommendation is downgraded
+  # to HOLD rather than issuing a FOLLOW that doesn't actually move the price down.
+  min_margin_guardrail_cpl: 1.0
+
+  # A station-day counts as "stale" once its actual observed price has gone unchanged
+  # for at least this many consecutive days. One week is the same order of magnitude
+  # as the fuel types' own empirical inter-jump cycle length (5.0-8.5 days, from the
+  # rule-based baseline's fitted cycle length per fuel type in Phase 2's MLflow runs)
+  # - a price that hasn't moved for a full cycle is a reasonable staleness signal.
+  stale_price_days_threshold: 7
+
+  # Six-month walk-forward backtest window. Chosen as the entire live out-of-sample
+  # span available after the existing (unretrained) Phase 2 jump classifier's train
+  # cutoff (2025-12-26) through the current end of the Gold archive (2026-06-30) -
+  # 186 days, ~6.1 months. The classifier has seen none of this data; per Phase 3
+  # methodology, one additional fit of the Phase 3 price-forecast model (identical,
+  # unchanged features/hyperparameters) was made on the same train_start..2025-12-26
+  # window, since Phase 3 evaluated forecast accuracy but never persisted a
+  # deployable model - see docs/pricing-policy.md SS2 for why this was necessary and
+  # why it is not a retrain of the validated methodology.
+  backtest_start_date: "2025-12-27"
+  backtest_end_date: "2026-06-30"
+  model_train_start_date: "2025-01-01"
+  model_train_end_date: "2025-12-26"

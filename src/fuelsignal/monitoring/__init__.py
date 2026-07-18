@@ -65,6 +65,76 @@ MONITORING_SCHEMAS = {
             'quality' = 'monitoring'
         )
     """,
+    "monitoring_pricing_policy_recommendations": """
+        CREATE TABLE IF NOT EXISTS {schema}.monitoring_pricing_policy_recommendations (
+            station_id STRING NOT NULL,
+            fuel_type STRING NOT NULL,
+            market_date DATE NOT NULL,
+            policy_mode STRING,
+            action STRING NOT NULL,
+            reason STRING,
+            guardrail_triggered BOOLEAN,
+            jump_signal_used BOOLEAN,
+            forecast_signal_used BOOLEAN,
+            jump_probability DOUBLE,
+            jump_threshold DOUBLE,
+            forecast_3d_change_cpl DOUBLE,
+            forecast_7d_change_cpl DOUBLE,
+            station_vs_competitor_median_cpl DOUBLE,
+            current_price_cpl DOUBLE,
+            tgp_cpl DOUBLE,
+            actual_indicative_margin_cpl DOUBLE,
+            hypothetical_price_cpl DOUBLE,
+            hypothetical_margin_cpl DOUBLE,
+            margin_difference_cpl DOUBLE,
+            days_since_price_change INT,
+            is_stale_actual BOOLEAN,
+            priced_above_competitors_actual BOOLEAN,
+            baseline_action STRING,
+            code_version STRING,
+            backtest_run_id STRING,
+            _pipeline_run_id STRING,
+            ingested_at TIMESTAMP
+        )
+        USING DELTA
+        COMMENT 'Per station-fuel-day HOLD/FOLLOW/LEAD policy recommendation - backtest output'
+        TBLPROPERTIES (
+            'delta.autoOptimize.optimizeWrite' = 'true',
+            'quality' = 'monitoring'
+        )
+    """,
+    "monitoring_policy_backtest_summary": """
+        CREATE TABLE IF NOT EXISTS {schema}.monitoring_policy_backtest_summary (
+            backtest_run_id STRING NOT NULL,
+            fuel_type STRING NOT NULL,
+            policy_mode STRING,
+            hold_count LONG,
+            follow_count LONG,
+            lead_count LONG,
+            baseline_hold_count LONG,
+            guardrail_intervention_count LONG,
+            stale_price_days_policy LONG,
+            stale_price_days_baseline LONG,
+            days_priced_above_competitors_actual LONG,
+            days_priced_above_competitors_unaddressed LONG,
+            avg_margin_difference_cpl DOUBLE,
+            total_margin_difference_cpl DOUBLE,
+            jump_signal_contribution_count LONG,
+            forecast_signal_contribution_count LONG,
+            row_count LONG,
+            backtest_start_date DATE,
+            backtest_end_date DATE,
+            model_train_end_date DATE,
+            generated_at TIMESTAMP,
+            _pipeline_run_id STRING
+        )
+        USING DELTA
+        COMMENT 'Pricing-policy backtest results per fuel type, policy vs always-HOLD baseline'
+        TBLPROPERTIES (
+            'delta.autoOptimize.optimizeWrite' = 'true',
+            'quality' = 'monitoring'
+        )
+    """,
 }
 
 

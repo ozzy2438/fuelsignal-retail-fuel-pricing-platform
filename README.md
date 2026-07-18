@@ -192,33 +192,39 @@ make lint
 | MLflow experiment tracking | ✅ Complete - `/Shared/fuelsignal-jump-model` on Databricks |
 | Per-fuel-type decision threshold calibration | ✅ Complete - see docs/threshold-calibration.md |
 | 7-day price-level forecast model | ✅ Complete (first iteration) - see docs/price-forecast.md |
+| Pricing policy (HOLD/FOLLOW/LEAD) | ✅ Complete (first iteration) - see docs/pricing-policy.md |
+| Six-month walk-forward policy backtest | ✅ Complete - 398,474 rows, see docs/pricing-policy.md |
 | Data quality framework | ✅ Complete |
-| Unit tests | ✅ Complete (160 tests) |
+| Unit tests | ✅ Complete (179 tests) |
 | CI/CD pipeline | ✅ Complete |
 | Documentation | ✅ Complete |
-| Pricing policy (HOLD/FOLLOW/LEAD) | ❌ Not started |
-| Walk-forward backtest of a deployed policy | ❌ Not started |
 | Power BI integration | ❌ Not started |
 
 ## ⚠️ Limitations
 
-1. **First-iteration model, no pricing policy yet** — LightGBM beats the rule-based
-   baseline on PR-AUC in every walk-forward fold, but is not uniformly better (the
-   baseline wins on F1 for U91, and in one fold overall) - see docs/model-results.md.
-   Per-fuel-type thresholds are now calibrated (docs/threshold-calibration.md), but two
-   fuel types (U91, P95) still fall back to the shared 0.5 default because no candidate
-   threshold cleared the recall/alert-fatigue/lead-time floors simultaneously - their
-   underlying model signal (PR-AUC 0.12-0.13) is the weakest of the six fuel types. No
-   commercial-impact claim.
-2. **Station coverage is bounded by the live reference API's current snapshot** — a bulk
+1. **First-iteration model** — LightGBM beats the rule-based baseline on PR-AUC in
+   every walk-forward fold, but is not uniformly better (the baseline wins on F1 for
+   U91, and in one fold overall) - see docs/model-results.md. Per-fuel-type thresholds
+   are calibrated (docs/threshold-calibration.md), but two fuel types (U91, P95) still
+   fall back to the shared 0.5 default because no candidate threshold cleared the
+   recall/alert-fatigue/lead-time floors simultaneously - their underlying model
+   signal (PR-AUC 0.12-0.13) is the weakest of the six fuel types, so they stay in
+   watch-only mode in the pricing policy and never receive a LEAD recommendation.
+   No commercial-impact claim.
+2. **TGP margin guardrail covers only DL and U91** — TGP (wholesale price) data only
+   maps to those two fuel types (established in Phase 1); for E10/P95/P98/PDL, the
+   pricing policy's FOLLOW recommendation has no margin floor at all. See
+   docs/pricing-policy.md SS5 for the full detail - this is the single most important
+   caveat before any production use of the policy.
+3. **Station coverage is bounded by the live reference API's current snapshot** — a bulk
    station that has closed/rebranded since the reference API was last queried, or whose
    address text formatting doesn't match, will not resolve to a coordinate and is
    quarantined rather than guessed (see docs/data-quality.md for exact rule names and
    counts)
-3. **AIP TGP** — Published as HTML/XLSX; extraction requires maintenance when page/workbook structure changes
-4. **No volume data** — Public sources don't include sales volume; margin analysis is indicative only
-5. **Single state** — Currently NSW only; architecture supports multi-state expansion
-6. **Free-tier Databricks** — Some Unity Catalog features may be limited; the SQL warehouse
+4. **AIP TGP** — Published as HTML/XLSX; extraction requires maintenance when page/workbook structure changes
+5. **No volume data** — Public sources don't include sales volume; margin analysis is indicative only
+6. **Single state** — Currently NSW only; architecture supports multi-state expansion
+7. **Free-tier Databricks** — Some Unity Catalog features may be limited; the SQL warehouse
    returned an unexplained `HTTP 403` mid-run once during a large historical backfill -
    idempotent per-file checksums mean a retry safely resumes rather than reprocessing
    everything
@@ -267,17 +273,31 @@ Week 2 Phase 3 (Threshold calibration + 7-day forecast) is complete:
   but far worse directional accuracy. Full results: docs/price-forecast.md. Tracked in
   a new experiment, `/Shared/fuelsignal-price-forecast`.
 
-**Still no pricing policy and no commercial-impact claim anywhere in the repository.**
-Next:
+**Still no commercial-impact claim anywhere in the repository.**
 
-1. **Pricing policy layer** — HOLD/FOLLOW/LEAD decision rules with a TGP margin
-   guardrail, built on top of the jump classifier's calibrated thresholds and the price
-   forecast
-2. **Walk-forward Backtest of the deployed policy** — 6-month out-of-sample validation
-   of the policy itself (methodology documented in docs/validation-methodology.md, not
-   yet executed against a policy)
-3. **Scheduling** — Databricks Jobs for daily automation
-4. **Power BI** — Reporting dashboard connected to Gold layer
+Week 2 Phase 4 (Pricing policy + six-month backtest) is complete: HOLD/FOLLOW/LEAD
+rules (`src/fuelsignal/policy/pricing_policy.py`) combine the calibrated jump
+probability, the 3-day/7-day forecast, competitor positioning, and a TGP margin
+guardrail - jump-model automation (and therefore any LEAD) is enabled only for
+E10/P98/DL/PDL, with U91/P95 in conservative watch-only mode per Phase 3's finding
+that their threshold never cleared the business-rule constraints. Backtested
+leakage-safe over the entire 186-day out-of-sample span after the (unretrained) Phase
+2 classifier's train cutoff (2025-12-27 -> 2026-06-30): 398,474 recommendations
+written to `monitoring_pricing_policy_recommendations`, aggregated per fuel type in
+`monitoring_policy_backtest_summary`. Key finding: **the TGP margin guardrail only
+has data to act on for DL and U91** (TGP is null for the other four fuel types in
+this window) - the single most important caveat before any production use. LEAD
+recommendations were followed by an actual jump at 1.7-2.9x the base rate across
+every automated fuel type. Full results: docs/pricing-policy.md. Tracked in
+`/Shared/fuelsignal-pricing-policy`. Config: `config/pricing_policy.yml`.
+
+**Still no commercial-impact claim anywhere in the repository.** Next:
+
+1. **Resolve the TGP coverage gap** — either accept it as a permanent limitation for
+   E10/P95/P98/PDL or find an alternative margin proxy for those four fuel types
+   before any production FOLLOW automation
+2. **Scheduling** — Databricks Jobs for daily automation
+3. **Power BI** — Reporting dashboard connected to Gold layer
 
 ## 📄 License
 
