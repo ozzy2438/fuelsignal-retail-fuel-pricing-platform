@@ -9,9 +9,12 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import requests
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
@@ -107,22 +110,8 @@ class DatabricksSqlClient:
         self.warehouse_id = warehouses[0]["id"]
         return self.warehouse_id
 
-    def execute(self, statement: str) -> dict[str, Any]:
-        """Execute one SQL statement and wait for its terminal state."""
-        warehouse_id = self.ensure_warehouse()
-        result = self._request(
-            "POST",
-            "/api/2.0/sql/statements",
-            json={
-                "warehouse_id": warehouse_id,
-                "statement": statement,
-                "wait_timeout": "50s",
-                "on_wait_timeout": "CONTINUE",
-                "format": "JSON_ARRAY",
-                "disposition": "INLINE",
-            },
-        )
-
+    def _await_terminal_state(self, result: dict[str, Any]) -> dict[str, Any]:
+        """Poll a submitted statement until it reaches a terminal state."""
         statement_id = result.get("statement_id")
         state = result.get("status", {}).get("state")
         while state not in TERMINAL_STATUSES:
@@ -137,6 +126,101 @@ class DatabricksSqlClient:
             message = error.get("message", "SQL statement failed without an error message")
             raise DeploymentError(message)
         return result
+
+    def execute(self, statement: str) -> dict[str, Any]:
+        """Execute one SQL statement and wait for its terminal state.
+
+        Uses INLINE disposition, capped at ~25MB - fine for DDL/DML/aggregates, but
+        raises DeploymentError for large SELECT results. Use execute_to_dataframe for
+        pulling large result sets (e.g. Gold tables for local model training).
+        """
+        warehouse_id = self.ensure_warehouse()
+        result = self._request(
+            "POST",
+            "/api/2.0/sql/statements",
+            json={
+                "warehouse_id": warehouse_id,
+                "statement": statement,
+                "wait_timeout": "50s",
+                "on_wait_timeout": "CONTINUE",
+                "format": "JSON_ARRAY",
+                "disposition": "INLINE",
+            },
+        )
+        return self._await_terminal_state(result)
+
+    def execute_to_dataframe(self, statement: str) -> pd.DataFrame:
+        """Execute a SELECT and return the full result as a pandas DataFrame.
+
+        Uses EXTERNAL_LINKS disposition and follows every result chunk via presigned
+        URLs - required for results too large for execute()'s INLINE 25MB cap (e.g.
+        Gold tables with hundreds of thousands of rows). Column types are coerced from
+        the statement's own result manifest, not guessed from the JSON values.
+        """
+        import pandas as pd
+
+        warehouse_id = self.ensure_warehouse()
+        result = self._request(
+            "POST",
+            "/api/2.0/sql/statements",
+            json={
+                "warehouse_id": warehouse_id,
+                "statement": statement,
+                "wait_timeout": "50s",
+                "on_wait_timeout": "CONTINUE",
+                "format": "JSON_ARRAY",
+                "disposition": "EXTERNAL_LINKS",
+            },
+        )
+        result = self._await_terminal_state(result)
+        statement_id = result["statement_id"]
+        manifest = result.get("manifest", {})
+        columns = manifest.get("schema", {}).get("columns", [])
+        column_names = [c["name"] for c in columns]
+        total_chunk_count = manifest.get("total_chunk_count", 0)
+
+        rows: list[list[Any]] = []
+        if total_chunk_count > 0:
+            first_links = result.get("result", {}).get("external_links", [])
+            chunk_links: dict[int, str] = {
+                link["chunk_index"]: link["external_link"] for link in first_links
+            }
+            for chunk_index in range(total_chunk_count):
+                if chunk_index not in chunk_links:
+                    chunk_meta = self._request(
+                        "GET", f"/api/2.0/sql/statements/{statement_id}/result/chunks/{chunk_index}"
+                    )
+                    chunk_links[chunk_index] = chunk_meta["external_links"][0]["external_link"]
+                last_error: Exception | None = None
+                for attempt in range(3):
+                    try:
+                        response = requests.get(chunk_links[chunk_index], timeout=180)
+                        response.raise_for_status()
+                        rows.extend(response.json())
+                        last_error = None
+                        break
+                    except requests.RequestException as exc:
+                        last_error = exc
+                        time.sleep(2**attempt)
+                if last_error is not None:
+                    raise DeploymentError(
+                        f"Failed to download result chunk {chunk_index} after 3 attempts: "
+                        f"{last_error}"
+                    ) from last_error
+
+        frame = pd.DataFrame(rows, columns=column_names)
+        for column in columns:
+            name = column["name"]
+            type_name = column.get("type_name", "")
+            if type_name in ("DOUBLE", "FLOAT", "INT", "BIGINT", "LONG"):
+                frame[name] = pd.to_numeric(frame[name], errors="coerce")
+            elif type_name in ("DATE", "TIMESTAMP"):
+                frame[name] = pd.to_datetime(frame[name], errors="coerce")
+            elif type_name == "BOOLEAN":
+                frame[name] = frame[name].map(
+                    {"true": True, "false": False, True: True, False: False}
+                )
+        return frame
 
 
 def first_value(result: dict[str, Any]) -> str | None:

@@ -60,3 +60,27 @@ pipeline:
   retry_delay_seconds: 30
   request_timeout_seconds: 60
   batch_size: 10000
+
+modelling:
+  # Week 2 Phase 2 (2026-07-18). Fuel types included in the first model iteration -
+  # LPG/E85/B20 have too little raw history for a stable jump-label frequency (see
+  # docs/jump-label-definition.md) and are deliberately excluded.
+  included_fuel_types: ["U91", "E10", "P95", "P98", "DL", "PDL"]
+  # Model-eligibility filter (docs/model-eligibility.md has the full empirical basis):
+  # a station x fuel_type series must have at least this many gold_station_daily_market
+  # observations to be used for training. Chosen empirically: 30 observations excludes
+  # 11.8% of the 8,846 candidate series (target-fuel-only) while 60 would exclude 33.2%
+  # - 30 is the more defensible floor for a first model iteration given the archive is
+  # only 18 months (489 days) long.
+  min_observations_per_series: 30
+  # A series is also excluded if more than this fraction of its
+  # gold_market_cycle_features rows show an implausible >100 cpl 14-day swing (see
+  # feature-engineering.md #7). 10% was chosen because it separates a small minority
+  # (4.5% of series) of genuinely noisy series from the ~34% of series that have merely
+  # ever had one such event, which is too common to treat as disqualifying on its own.
+  max_extreme_change_rate: 0.10
+  # Walk-forward (expanding-window) validation folds. Never a random split - see
+  # docs/validation-methodology.md.
+  walk_forward_folds: 4
+  walk_forward_min_train_days: 180
+  walk_forward_test_days: 60

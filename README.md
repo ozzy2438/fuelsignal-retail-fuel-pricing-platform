@@ -185,17 +185,26 @@ make lint
 | Competitor geospatial (5km Haversine) | ✅ Complete |
 | Price-jump label definition + sensitivity analysis | ✅ Complete - see docs/jump-label-definition.md |
 | Gold-layer leakage controls | ✅ Complete - see docs/validation-methodology.md |
+| Model-eligibility filter | ✅ Complete - see docs/model-eligibility.md |
+| Rule-based 48h jump baseline | ✅ Complete - see docs/model-results.md |
+| LightGBM 48h jump classifier | ✅ Complete (first iteration) - see docs/model-results.md |
+| Walk-forward model validation | ✅ Complete (4 expanding-window folds) |
+| MLflow experiment tracking | ✅ Complete - `/Shared/fuelsignal-jump-model` on Databricks |
 | Data quality framework | ✅ Complete |
-| Unit tests | ✅ Complete (102 tests) |
+| Unit tests | ✅ Complete (131 tests) |
 | CI/CD pipeline | ✅ Complete |
 | Documentation | ✅ Complete |
-| ML models | ❌ Not started (Gold feature layer now ready) |
-| Walk-forward backtest | ❌ Not started |
+| Pricing policy (HOLD/FOLLOW/LEAD) | ❌ Not started |
+| Walk-forward backtest of a deployed policy | ❌ Not started |
+| 7-day price-level forecast model | ❌ Not started |
 | Power BI integration | ❌ Not started |
 
 ## ⚠️ Limitations
 
-1. **No ML models yet** — The data foundation must be validated before modelling
+1. **First-iteration model, no pricing policy yet** — LightGBM beats the rule-based
+   baseline on PR-AUC in every walk-forward fold, but is not uniformly better (the
+   baseline wins on F1 for U91, and in one fold overall) - see docs/model-results.md.
+   No threshold calibration, no commercial-impact claim.
 2. **Station coverage is bounded by the live reference API's current snapshot** — a bulk
    station that has closed/rebranded since the reference API was last queried, or whose
    address text formatting doesn't match, will not resolve to a coordinate and is
@@ -224,19 +233,27 @@ Week 2 Phase 1 (Gold feature layer) is complete: all six Gold tables populated l
 (7.0 cpl, see docs/jump-label-definition.md), leakage controls verified (0 duplicate
 keys, no lookahead in any feature column, Python/SQL cross-check agrees at every
 candidate threshold). See docs/feature-engineering.md and docs/data-quality.md for the
-full live results. Week 2 Phase 2 (Modelling) has **not** started. Next:
+full live results.
 
-1. **Rule-based baseline** — codify the "reprice same-day if a jump is detected"
-   heuristic against `gold_price_jump_labels` as the comparison point for the ML model
-2. **ML Model v1** — Binary classifier for 48-hour jump probability, LightGBM vs the
-   rule-based baseline, trained on `gold_daily_pricing_inputs` joined to
-   `gold_price_jump_labels`
-3. **7-day price-level forecast** — using `gold_market_cycle_features`
-4. **Walk-forward Backtest** — 6-month out-of-sample validation (methodology already
-   documented in docs/validation-methodology.md, not yet executed)
-5. **Recommendation Engine** — HOLD/FOLLOW/LEAD decision layer
-6. **Scheduling** — Databricks Jobs for daily automation
-7. **Power BI** — Reporting dashboard connected to Gold layer
+Week 2 Phase 2 (Modelling, first iteration) is complete: a model-eligibility filter
+excluded 16.0% of station x fuel_type series before training (docs/model-eligibility.md);
+a transparent rule-based baseline and a LightGBM classifier were both evaluated with
+4-fold walk-forward (never random) validation across U91/E10/P95/P98/DL/PDL
+(LPG/E85/B20 excluded - too little history); LightGBM's PR-AUC beat the baseline's in
+every fold; every run tracked in the Databricks-hosted MLflow experiment
+`/Shared/fuelsignal-jump-model`. Full results: docs/model-results.md. **No pricing
+policy exists yet and no commercial-impact claim is made anywhere.** Next:
+
+1. **Per-fuel-type threshold calibration** — U91 in particular needs a tuned decision
+   threshold rather than the shared default 0.5 (docs/model-results.md §5b)
+2. **7-day price-level forecast** — using `gold_market_cycle_features`
+3. **Pricing policy layer** — HOLD/FOLLOW/LEAD decision rules with a TGP margin
+   guardrail, built on top of the jump classifier's output
+4. **Walk-forward Backtest of the deployed policy** — 6-month out-of-sample validation
+   of the policy itself (methodology documented in docs/validation-methodology.md, not
+   yet executed against a policy)
+5. **Scheduling** — Databricks Jobs for daily automation
+6. **Power BI** — Reporting dashboard connected to Gold layer
 
 ## 📄 License
 
