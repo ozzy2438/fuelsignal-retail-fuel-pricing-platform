@@ -190,13 +190,14 @@ make lint
 | LightGBM 48h jump classifier | ✅ Complete (first iteration) - see docs/model-results.md |
 | Walk-forward model validation | ✅ Complete (4 expanding-window folds) |
 | MLflow experiment tracking | ✅ Complete - `/Shared/fuelsignal-jump-model` on Databricks |
+| Per-fuel-type decision threshold calibration | ✅ Complete - see docs/threshold-calibration.md |
+| 7-day price-level forecast model | ✅ Complete (first iteration) - see docs/price-forecast.md |
 | Data quality framework | ✅ Complete |
-| Unit tests | ✅ Complete (131 tests) |
+| Unit tests | ✅ Complete (160 tests) |
 | CI/CD pipeline | ✅ Complete |
 | Documentation | ✅ Complete |
 | Pricing policy (HOLD/FOLLOW/LEAD) | ❌ Not started |
 | Walk-forward backtest of a deployed policy | ❌ Not started |
-| 7-day price-level forecast model | ❌ Not started |
 | Power BI integration | ❌ Not started |
 
 ## ⚠️ Limitations
@@ -204,7 +205,11 @@ make lint
 1. **First-iteration model, no pricing policy yet** — LightGBM beats the rule-based
    baseline on PR-AUC in every walk-forward fold, but is not uniformly better (the
    baseline wins on F1 for U91, and in one fold overall) - see docs/model-results.md.
-   No threshold calibration, no commercial-impact claim.
+   Per-fuel-type thresholds are now calibrated (docs/threshold-calibration.md), but two
+   fuel types (U91, P95) still fall back to the shared 0.5 default because no candidate
+   threshold cleared the recall/alert-fatigue/lead-time floors simultaneously - their
+   underlying model signal (PR-AUC 0.12-0.13) is the weakest of the six fuel types. No
+   commercial-impact claim.
 2. **Station coverage is bounded by the live reference API's current snapshot** — a bulk
    station that has closed/rebranded since the reference API was last queried, or whose
    address text formatting doesn't match, will not resolve to a coordinate and is
@@ -242,18 +247,37 @@ a transparent rule-based baseline and a LightGBM classifier were both evaluated 
 (LPG/E85/B20 excluded - too little history); LightGBM's PR-AUC beat the baseline's in
 every fold; every run tracked in the Databricks-hosted MLflow experiment
 `/Shared/fuelsignal-jump-model`. Full results: docs/model-results.md. **No pricing
-policy exists yet and no commercial-impact claim is made anywhere.** Next:
+policy exists yet and no commercial-impact claim is made anywhere.**
 
-1. **Per-fuel-type threshold calibration** — U91 in particular needs a tuned decision
-   threshold rather than the shared default 0.5 (docs/model-results.md §5b)
-2. **7-day price-level forecast** — using `gold_market_cycle_features`
-3. **Pricing policy layer** — HOLD/FOLLOW/LEAD decision rules with a TGP margin
-   guardrail, built on top of the jump classifier's output
-4. **Walk-forward Backtest of the deployed policy** — 6-month out-of-sample validation
+Week 2 Phase 3 (Threshold calibration + 7-day forecast) is complete:
+
+- **Per-fuel-type threshold calibration** (Part 1) — a business-oriented selection rule
+  (recall floor, alert-fatigue cap, minimum lead time - never max-F1-alone) chose a
+  threshold per fuel type from a validation-only grid sweep, honestly separated from
+  each walk-forward fold's test period. Four of six fuel types (E10/P98/DL/PDL) got a
+  calibrated threshold; U91 and P95 fell back to the shared 0.5 default because no
+  candidate cleared all three constraints. Live results, the exact floor/cap values and
+  why: docs/threshold-calibration.md. Chosen thresholds versioned in
+  `config/model_thresholds.yml`; tracked in `/Shared/fuelsignal-jump-model`.
+- **Seven-day market-level price forecast** (Part 2) — LightGBM regressors for the
+  1/3/7-day horizons, compared against persistence, a 7-day moving average, and a
+  14-day linear trend, all walk-forward validated. LightGBM wins decisively at 3 and 7
+  days (roughly 30-70% lower WAPE than the baselines, 0.5-0.76 directional accuracy vs
+  the baselines' near-zero at day 7); at day 1, persistence has marginally lower error
+  but far worse directional accuracy. Full results: docs/price-forecast.md. Tracked in
+  a new experiment, `/Shared/fuelsignal-price-forecast`.
+
+**Still no pricing policy and no commercial-impact claim anywhere in the repository.**
+Next:
+
+1. **Pricing policy layer** — HOLD/FOLLOW/LEAD decision rules with a TGP margin
+   guardrail, built on top of the jump classifier's calibrated thresholds and the price
+   forecast
+2. **Walk-forward Backtest of the deployed policy** — 6-month out-of-sample validation
    of the policy itself (methodology documented in docs/validation-methodology.md, not
    yet executed against a policy)
-5. **Scheduling** — Databricks Jobs for daily automation
-6. **Power BI** — Reporting dashboard connected to Gold layer
+3. **Scheduling** — Databricks Jobs for daily automation
+4. **Power BI** — Reporting dashboard connected to Gold layer
 
 ## 📄 License
 

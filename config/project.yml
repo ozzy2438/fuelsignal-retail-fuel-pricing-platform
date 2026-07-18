@@ -84,3 +84,31 @@ modelling:
   walk_forward_folds: 4
   walk_forward_min_train_days: 180
   walk_forward_test_days: 60
+
+threshold_calibration:
+  # Week 2 Phase 3 (2026-07-19). Per-fuel-type decision thresholds are calibrated on a
+  # validation slice carved out of each walk-forward fold's TRAIN period only (the
+  # last N days) - never against the fold's held-out test period. See
+  # docs/threshold-calibration.md for the full methodology and results.
+  validation_days: 30
+  threshold_grid_min: 0.05
+  threshold_grid_max: 0.95
+  threshold_grid_step: 0.05
+  # Business-oriented selection floors/caps (docs/threshold-calibration.md explains
+  # each value): a threshold must satisfy all three to be considered, and only then
+  # is F1 used as a tiebreaker - never picked by F1 alone.
+  min_recall: 0.30
+  max_false_alarms_per_market_month: 6.0
+  min_avg_lead_time_days: 1.0
+
+price_forecast:
+  # Week 2 Phase 3, Part 2 (2026-07-19). Market-level (fuel_type x market_date) daily
+  # median price forecast, walk-forward validated on the same 4-fold scheme as
+  # `modelling` above. LPG/E85/B20 excluded from this first iteration for the same
+  # reason as jump detection (see modelling.included_fuel_types) - too little history
+  # for a stable series. See docs/price-forecast.md for methodology and results.
+  included_fuel_types: ["U91", "E10", "P95", "P98", "DL", "PDL"]
+  horizons_days: [1, 3, 7]
+  rolling_windows_days: [7, 14]
+  moving_average_window_days: 7
+  linear_trend_window_days: 14

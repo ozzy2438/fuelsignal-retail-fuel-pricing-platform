@@ -1,0 +1,72 @@
+calibrated_at: '2026-07-18T07:43:44.885062+00:00'
+code_version: 67b8d29
+mlflow_run_id: 09aaf096a530448880af487ee2fc6d8b
+selection_rule:
+  min_recall: 0.3
+  max_false_alarms_per_market_month: 6.0
+  min_avg_lead_time_days: 1.0
+  description: Among validation-set thresholds satisfying recall >= min_recall AND
+    false_alarms_per_market_month <= max_false_alarms_per_market_month AND average_lead_time_days
+    >= min_avg_lead_time_days, pick the one with the highest F1. Never selects by
+    F1 alone.
+thresholds:
+  U91:
+    threshold: 0.5
+    fallback_to_0.5: true
+    selection_reason: no_threshold_satisfies_constraints
+    validation_precision: null
+    validation_recall: null
+    validation_f1: null
+    validation_false_alarms_per_market_month: null
+    validation_average_lead_time_days: null
+    pr_auc_validation: 0.11881686326453109
+  E10:
+    threshold: 0.4
+    fallback_to_0.5: false
+    selection_reason: highest_f1_among_qualifying
+    validation_precision: 0.18167249417249418
+    validation_recall: 0.3060122699386503
+    validation_f1: 0.22799158972483777
+    validation_false_alarms_per_market_month: 5.735294117647059
+    validation_average_lead_time_days: 1.4
+    pr_auc_validation: 0.2292298341282738
+  P95:
+    threshold: 0.5
+    fallback_to_0.5: true
+    selection_reason: no_threshold_satisfies_constraints
+    validation_precision: null
+    validation_recall: null
+    validation_f1: null
+    validation_false_alarms_per_market_month: null
+    validation_average_lead_time_days: null
+    pr_auc_validation: 0.12743215423796211
+  P98:
+    threshold: 0.35
+    fallback_to_0.5: false
+    selection_reason: highest_f1_among_qualifying
+    validation_precision: 0.2260954780904382
+    validation_recall: 0.45288839035333706
+    validation_f1: 0.3016154636287235
+    validation_false_alarms_per_market_month: 5.294117647058823
+    validation_average_lead_time_days: 1.5
+    pr_auc_validation: 0.1914056019609371
+  DL:
+    threshold: 0.35
+    fallback_to_0.5: false
+    selection_reason: highest_f1_among_qualifying
+    validation_precision: 0.3653250773993808
+    validation_recall: 0.3219645293315143
+    validation_f1: 0.34227701232777374
+    validation_false_alarms_per_market_month: 3.9705882352941178
+    validation_average_lead_time_days: 1.4444444444444444
+    pr_auc_validation: 0.32080705475867666
+  PDL:
+    threshold: 0.65
+    fallback_to_0.5: false
+    selection_reason: highest_f1_among_qualifying
+    validation_precision: 0.4367487120778477
+    validation_recall: 0.4313171283210854
+    validation_f1: 0.4340159271899886
+    validation_false_alarms_per_market_month: 3.088235294117647
+    validation_average_lead_time_days: 1.6
+    pr_auc_validation: 0.38599243387171084
