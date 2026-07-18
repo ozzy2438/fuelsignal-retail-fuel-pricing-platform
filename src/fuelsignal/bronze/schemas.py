@@ -122,7 +122,15 @@ BRONZE_SCHEMAS = {
             status STRING,
             error_message STRING,
             environment STRING,
-            _ingested_at TIMESTAMP
+            _ingested_at TIMESTAMP,
+            stage STRING,
+            source_file STRING,
+            source_checksum STRING,
+            records_read LONG,
+            records_written LONG,
+            records_rejected LONG,
+            source_date_range STRING,
+            code_version STRING
         )
         USING DELTA
         COMMENT 'Audit trail for all bronze ingestion pipeline runs'

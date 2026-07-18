@@ -5,16 +5,21 @@
 sources:
   nsw_fuelcheck:
     name: "NSW FuelCheck"
-    description: "Real-time and historical retail fuel prices for NSW stations"
+    description: "Historical retail fuel prices for NSW stations (bulk CKAN monthly archive)"
     provider: "NSW Government - Data.NSW"
     landing_page: "https://data.nsw.gov.au/data/dataset/fuel-check"
-    api_base: "https://api.onegov.nsw.gov.au/FuelCheckApp/v2/fuel/prices"
+    # api.onegov.nsw.gov.au/FuelCheckApp/v1|v2 is RETIRED (confirmed live: HTTP 404 as of
+    # 2026-07-18). Do not use it. The bulk CKAN monthly archive below remains the source
+    # for historical prices; it has never included station coordinates (verified across
+    # every monthly resource from Aug 2016 to Jun 2026).
+    api_base_retired: "https://api.onegov.nsw.gov.au/FuelCheckApp/v2/fuel/prices"
+    api_base_retired_confirmed_dead_at: "2026-07-18"
     # Alternative: CKAN data resource for historical downloads
     ckan_dataset: "https://data.nsw.gov.au/data/api/3/action/package_show?id=fuel-check"
     resolved_download_url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/5576690a-2d64-4c61-a6a8-fa2975fc9d4e/download/price_history_checks_mar2026.csv"
     resolved_resource_name: "FuelCheck Price History March 2026"
-    data_format: "json"
-    frequency: "daily"
+    data_format: "csv_or_xlsx"
+    frequency: "monthly_archive"
     coverage:
       geographic: "NSW, Australia"
       temporal: "2016-present"
@@ -26,15 +31,112 @@ sources:
       - address
       - suburb
       - postcode
-      - latitude
-      - longitude
       - fuel_type
       - price
       - last_updated
+    # 18 consecutive months (Jan 2025 - Jun 2026) resolved from the CKAN package_show
+    # response on 2026-07-18. Format is per-resource (CKAN's declared format tag is
+    # occasionally wrong - the pipeline detects actual format from the URL extension).
+    historical_resources:
+      - month: "2025-01"
+        name: "FuelCheck Price History Jan 2025"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/133c5415-9954-44e8-8699-2c2942d35a8b/download/price_history_checks_jan2025.csv"
+      - month: "2025-02"
+        name: "FuelCheck Price History Feb 2025"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/c350fcce-32f2-4e13-b569-a90a47c46ffa/download/price_history_checks_feb2025.csv"
+      - month: "2025-03"
+        name: "FuelCheck Price History Mar 2025"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/215bafd0-031e-4106-9b59-694e0f222e5f/download/fuelcheck_pricehistory_mar25.xlsx"
+      - month: "2025-04"
+        name: "FuelCheck Price History Apr 2025"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/9931c7da-83d6-4ca7-9441-9305e0f851e1/download/fuelcheck_pricehistory_apr2025.xlsx"
+      - month: "2025-05"
+        name: "FuelCheck Price History May 2025"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/36a03fb6-ff84-48e2-956f-dd1e0365f38b/download/fuelcheck_pricehistory_may2025.xlsx"
+      - month: "2025-06"
+        name: "FuelCheck Price History June 2025"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/df5c9553-433c-4a90-a5a9-de19ecc543f6/download/price_history_checks_jun2025.csv"
+      - month: "2025-07"
+        name: "FuelCheck Price History July 2025"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/55416beb-6bba-46ff-ae35-a238a2001f08/download/fuelcheck_pricehistory_july2025.xlsx"
+      - month: "2025-08"
+        name: "FuelCheck Price History Aug 2025"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/e8452b3b-2e02-4577-8f39-35a07b9e99b9/download/fuelcheck_pricehistory_aug2025.xlsx"
+      - month: "2025-09"
+        name: "FuelCheck Price History Sep 2025"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/e12a757e-a9fe-4cbe-9034-55f00314c72b/download/fuelcheck_pricehistory_sep2025.xlsx"
+      - month: "2025-10"
+        name: "FuelCheck Price History Oct 2025"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/c5ae66f9-9324-49b9-8f90-07cd6eb12d42/download/price_history_checks_oct2025.csv"
+      - month: "2025-11"
+        name: "FuelCheck Price History Nov 2025"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/e9dc591d-17ee-4433-9d75-da75b4f09237/download/fuelcheck_pricehistory_nov2025.xlsx"
+      - month: "2025-12"
+        name: "FuelCheck Price History Dec 2025"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/6794ad02-fd2b-44a6-be9c-55f726b266c0/download/fuelcheck_pricehistory_dec2025.xlsx"
+      - month: "2026-01"
+        name: "FuelCheck Price History Jan 2026"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/340d3518-4d5c-4e6e-a30d-e5d4be3e4edb/download/fuelcheck_pricehistory_jan2026.xlsx"
+      - month: "2026-02"
+        name: "FuelCheck Price History Feb 2026"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/3786820f-8efd-4b13-b2ba-56096a9d42b3/download/price_history_checks_feb2026.csv"
+      - month: "2026-03"
+        name: "FuelCheck Price History Mar 2026"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/5576690a-2d64-4c61-a6a8-fa2975fc9d4e/download/price_history_checks_mar2026.csv"
+      - month: "2026-04"
+        name: "FuelCheck Price History Apr 2026"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/4a9d6b0e-fcaf-4d8b-b443-6f214ca7c8ce/download/fuelcheck_pricehistory_apr2026.xlsx"
+      - month: "2026-05"
+        name: "FuelCheck Price History May 2026"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/3519774e-5080-44d8-8f06-efcbbeebc1af/download/fuelcheck_pricehistory_may2026.xlsx"
+      - month: "2026-06"
+        name: "FuelCheck Price History June 2026"
+        url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/ddad9e92-997b-4233-95b2-4f9c06890767/download/fuelcheck_pricehistory_jun2026.xlsx"
     notes: |
-      The FuelCheck API requires an API key obtainable via registration.
-      Historical data may be available via CKAN bulk downloads.
-      Rate limits apply to real-time API access.
+      The bulk CKAN monthly archive has never included station coordinates in any
+      resource from Aug 2016 to Jun 2026 (verified by inspecting the oldest and
+      newest available files). Coordinates come only from nsw_fuelcheck_api_reference.
+
+  nsw_fuelcheck_api_reference:
+    name: "NSW FuelCheck Live Reference Data API"
+    description: "Official live station reference data: code, brand, address, coordinates"
+    provider: "NSW Government - Department of Customer Service (OneGov)"
+    landing_page: "https://api.nsw.gov.au/Product/Index/22"
+    token_url: "https://api.onegov.nsw.gov.au/oauth/client_credential/accesstoken"
+    api_base: "https://api.onegov.nsw.gov.au/FuelCheckRefData/v2/fuel/lovs"
+    auth_type: "oauth2_client_credentials"
+    auth_notes: |
+      Requires a registered application at https://api.nsw.gov.au (Fuel API product).
+      Credentials are read from FUELCHECK_API_KEY / FUELCHECK_API_SECRET environment
+      variables (never committed - see .env.example). Confirmed live flow as of
+      2026-07-18:
+        1. GET {token_url}?grant_type=client_credentials with an HTTP Basic
+           Authorization header (base64 of "key:secret"). Must be GET - the documented
+           POST form returns HTTP 200 but silently echoes the request body instead of
+           issuing a token.
+        2. GET {api_base} with Authorization: Bearer <token>, apikey: <FUELCHECK_API_KEY>,
+           transactionid: <uuid4>, requesttimestamp: <dd/MM/yyyy HH:mm:ss> headers.
+           Omitting transactionid/requesttimestamp fails with HeadersError.
+    data_format: "json"
+    frequency: "on_demand"
+    coverage:
+      geographic: "NSW, Australia"
+      temporal: "current_snapshot_only"
+      granularity: "station-level"
+    fields_expected:
+      - code
+      - name
+      - brand
+      - address
+      - location.latitude
+      - location.longitude
+      - state
+    notes: |
+      Response also includes brands.items and fueltypes.items lookup lists (unused
+      by this pipeline today). Verified 2026-07-18: 3323 stations returned, 0 missing
+      coordinates, 0 duplicate station codes. This endpoint has no historical depth -
+      it is a live snapshot used only to enrich/crosswalk the bulk price history via
+      normalized address matching (see src/fuelsignal/silver/station_matching.py).
 
   aip_terminal_gate_prices:
     name: "AIP Terminal Gate Prices"
@@ -59,6 +161,11 @@ sources:
       TGP data is published on the AIP website.
       May require HTML parsing or structured extraction.
       Products include ULP, PULP, Diesel, E10 etc.
+      The single "historical-ulp-and-diesel-tgp-data" workbook (resolved_download_url)
+      already contains daily terminal-level data from 2004-01-01 through the current
+      date (verified live 2026-07-18: silver_terminal_gate_prices spans 2004-01-01 to
+      2026-07-17, 5882 distinct dates). No separate historical backfill is needed for
+      this source - the existing monthly re-download already captures full history.
 
   accc_petrol_cycles:
     name: "ACCC Petrol Price Cycles"

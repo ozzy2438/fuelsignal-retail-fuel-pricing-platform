@@ -45,12 +45,17 @@ Public Holidays ────▶┤                  │  + Station Master  │
 #### Silver (Conformed)
 - Type standardisation and casting
 - Fuel type normalization across sources
-- Deterministic station key generation
+- Deterministic station identity crosswalk: the bulk price archive (no station code, no
+  coordinates) is matched against the live FuelCheck reference API (official code +
+  coordinates, no price history) via a normalized `address + postcode` key - see
+  `src/fuelsignal/silver/station_matching.py` and `data-quality.md`
 - Coordinate validation (NSW bounds)
 - Price plausibility checks
 - Duplicate detection and handling
-- Competitor pair computation (Haversine, 5km radius)
-- Quality issues recorded (never silently dropped)
+- Competitor pair computation (Haversine with a bounding-box pre-filter, 5km radius,
+  single direction per pair since the relationship is symmetric)
+- Quality issues recorded (never silently dropped) - ambiguous or unmatched stations are
+  quarantined, never guessed
 
 #### Gold (Analytics)
 - SQL window functions for rolling aggregates

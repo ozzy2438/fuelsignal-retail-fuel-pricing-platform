@@ -47,7 +47,13 @@ SILVER_SCHEMAS = {
             first_seen_date DATE,
             last_seen_date DATE,
             source_name STRING,
-            _pipeline_run_id STRING
+            _pipeline_run_id STRING,
+            official_station_code STRING,
+            match_method STRING,
+            match_confidence DOUBLE,
+            effective_from DATE,
+            effective_to DATE,
+            ingested_at TIMESTAMP
         )
         USING DELTA
         COMMENT 'Canonical station master with stable keys - silver layer'
@@ -100,7 +106,8 @@ SILVER_SCHEMAS = {
             effective_from DATE NOT NULL,
             effective_to DATE,
             calculation_method STRING,
-            _pipeline_run_id STRING
+            _pipeline_run_id STRING,
+            created_at TIMESTAMP
         )
         USING DELTA
         COMMENT 'Station-to-station competitor pairs within ~5km - silver layer'

@@ -11,9 +11,25 @@ for each table in the FuelSignal platform.
 
 ### bronze_fuelcheck_prices_raw
 - **Grain**: One row per station per fuel type per price observation
-- **Primary Key**: `_source_record_hash` (deduplication key)
+- **Primary Key**: `_source_record_hash` (deduplication key; embeds name/address/postcode/
+  brand/fuel/date/price, so a corrected re-parse of the same source file produces new
+  hashes rather than silently colliding with bad historical rows)
 - **Immutability**: Append-only; raw data never modified
 - **Metadata**: `_ingested_at`, `_source_name`, `_source_url`, `_source_file`, `_pipeline_run_id`
+- **Coordinates**: always NULL - the bulk archive never carries them (see data-sources.md).
+  `latitude`/`longitude` are only ever populated in Silver, via the address+postcode
+  crosswalk against `nsw_fuelcheck_api_reference` rows in `bronze_fuelcheck_stations_raw`.
+
+### bronze_fuelcheck_stations_raw
+- **Grain**: One row per distinct station identity **per source** - this table holds two
+  populations distinguished by `_source_name`:
+  - `nsw_fuelcheck` - one row per distinct (name, address, postcode, brand) combination
+    seen in the bulk price archive. `station_code` here is a **synthetic** SHA-256 hash
+    of (name, address, postcode) - the bulk archive has no official code.
+  - `nsw_fuelcheck_api_reference` - one row per official station from the live reference
+    API. `station_code` here is the **real, NSW-issued** station code, and `latitude`/
+    `longitude` are populated.
+- **Primary Key**: `_source_record_hash`, scoped within each `_source_name`
 
 ### bronze_aip_tgp_raw
 - **Grain**: One row per terminal per product per date
@@ -32,24 +48,41 @@ for each table in the FuelSignal platform.
 - **Grain**: One row per `station_id` per `fuel_type` per `observed_at`
 - **Primary Key**: (`station_id`, `fuel_type`, `observed_at`)
 - **Data Types**: All typed and validated
-- **Quality**: Prices within [80, 300] cpl; coordinates within NSW
-- **Limitations**: Depends on source data availability
+- **Quality**: Prices within [80, 300] cpl; `station_id` only populated when the row's
+  address+postcode resolved to a coordinate-bearing `silver_station_master` row
+- **Live volume (2026-07-18, 18-month archive Jan 2025 - Jun 2026)**: 1,197,046 rows,
+  ~84% of the 1,423,296 bronze price rows for the period (the remainder is quarantined
+  in `silver_data_quality_issues`, predominantly `fuelcheck_station_unmatched`)
+- **Limitations**: Depends on source data availability and the live reference API's
+  current snapshot for coordinate matching
 
 ### silver_station_master
-- **Grain**: One row per unique station
-- **Primary Key**: `station_id`
-- **Key Generation**: Official `station_code` where available; SHA-256 hash of (name + address) as fallback
-- **Limitations**: Brand normalization is rule-based; some edge cases possible
+- **Grain**: One row per unique official station
+- **Primary Key**: `station_id` (SHA-256 of the official station code)
+- **Key Generation**: Official `station_code` from the live FuelCheck reference API only -
+  the bulk archive has no official code, so it is never used to derive `station_id`
+- **Live volume (2026-07-18)**: 3098 rows, 0 null coordinates, all within NSW bounds
+  (lat -37.16 to -28.18, lon 141.43 to 153.62)
+- **Limitations**: Brand normalization is rule-based; some edge cases possible; only
+  covers the live reference API's current snapshot (closed/rebranded stations from the
+  historical archive that no longer appear in the live feed have no coordinates)
 
 ### silver_terminal_gate_prices
 - **Grain**: One row per `tgp_date` per `terminal` per `fuel_type`
 - **Primary Key**: (`tgp_date`, `terminal`, `fuel_type`)
 - **Quality**: TGP must be positive and within [60, 250] cpl
+- **Live volume (2026-07-18)**: 82,348 rows spanning 2004-01-01 to 2026-07-17 (5882
+  distinct dates) from a single workbook download - no separate historical backfill needed
 
 ### silver_competitor_pairs
-- **Grain**: One row per directed station pair
+- **Grain**: One row per undirected station pair (single direction: `station_id <
+  competitor_station_id`, since the relationship is symmetric)
 - **Primary Key**: (`station_id`, `competitor_station_id`)
-- **Rules**: Within 5km (Haversine); no self-pairs; no duplicate reversed pairs
+- **Rules**: Within 5km (Haversine, with a bounding-box pre-filter); no self-pairs; no
+  duplicate pairs
+- **Live volume (2026-07-18)**: 51,579 pairs across 3098 stations; 0 self-pairs, 0
+  duplicate pairs, max distance 4.9998km; competitors per station: min 1, median 16,
+  max 227, 226 stations with zero competitors within 5km (isolated/regional)
 - **Limitations**: Static radius; doesn't account for roads or driving time
 
 ### silver_public_holidays

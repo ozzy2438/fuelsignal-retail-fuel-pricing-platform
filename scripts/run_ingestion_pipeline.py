@@ -1,6 +1,6 @@
-"""Run the live, idempotent FuelSignal Bronze and first Silver pipeline."""
+"""Run the live, idempotent FuelSignal Bronze and Silver pipeline."""
 
-# ruff: noqa: E501, S603, S608
+# ruff: noqa: E501, S603, S607, S608
 
 from __future__ import annotations
 
@@ -30,8 +30,13 @@ from deploy_databricks_foundation import (  # noqa: E402
     validate_identifier,
 )
 from fuelsignal.config import (  # noqa: E402
+    load_env,
     load_project_config,
     load_sources_config,
+)
+from fuelsignal.ingestion.fuelcheck_stations import (  # noqa: E402
+    FuelCheckAuthError,
+    FuelCheckStationReferenceIngester,
 )
 
 CATALOG = "fuelsignal"
@@ -39,6 +44,16 @@ SCHEMA_PREFIX = "fuelsignal"
 RAW_VOLUME = "raw_sources"
 USER_AGENT = "FuelSignal-Portfolio/0.2 (+https://github.com/ozzy2438/fuelsignal-retail-fuel-pricing-platform)"
 DEFAULT_HOST = "https://dbc-aaefb4e4-e074.cloud.databricks.com"
+FUELCHECK_MONTH_COLUMNS = [
+    "ServiceStationName",
+    "Address",
+    "Suburb",
+    "Postcode",
+    "Brand",
+    "FuelCode",
+    "PriceUpdatedDate",
+    "Price",
+]
 
 
 def sql_literal(value: str | None) -> str:
@@ -51,6 +66,18 @@ def sql_literal(value: str | None) -> str:
 def sha256_bytes(content: bytes) -> str:
     """Return a deterministic SHA-256 artifact hash."""
     return hashlib.sha256(content).hexdigest()
+
+
+def normalize_key_sql(address_expr: str, postcode_expr: str) -> str:
+    """SQL equivalent of fuelsignal.silver.station_matching.normalize_address_key()."""
+
+    def norm(expr: str) -> str:
+        return (
+            f"trim(regexp_replace(regexp_replace(upper(coalesce({expr}, '')), "
+            "'[^A-Z0-9]', ' '), ' +', ' '))"
+        )
+
+    return f"concat({norm(address_expr)}, '|', {norm(postcode_expr)})"
 
 
 def fetch_required(url: str, timeout: int, retries: int) -> tuple[bytes, float]:
@@ -100,6 +127,45 @@ def databricks_auth() -> tuple[str, str]:
     if not access_token:
         raise OSError(f"Databricks CLI profile '{profile}' returned no access token")
     return os.environ.get("DATABRICKS_HOST", DEFAULT_HOST).rstrip("/"), access_token
+
+
+def git_commit_short() -> str:
+    """Return the short git commit hash for audit code_version tracking."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(PROJECT_ROOT), "rev-parse", "--short", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return result.stdout.strip()
+    except (subprocess.SubprocessError, OSError):
+        return "unknown"
+
+
+def parse_fuelcheck_month(content: bytes, filename: str) -> pd.DataFrame:
+    """Parse one official FuelCheck monthly resource (CSV or XLSX) into a canonical frame."""
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".csv":
+        frame = pd.read_csv(io.BytesIO(content), dtype={"Postcode": str})
+    elif suffix in (".xlsx", ".xls"):
+        frame = pd.read_excel(io.BytesIO(content), sheet_name=0, dtype={"Postcode": str})
+    else:
+        raise RuntimeError(f"Unsupported FuelCheck resource format for {filename}: {suffix}")
+
+    missing = set(FUELCHECK_MONTH_COLUMNS) - set(frame.columns)
+    if missing:
+        raise RuntimeError(f"{filename} is missing expected columns: {sorted(missing)}")
+
+    frame = frame[FUELCHECK_MONTH_COLUMNS].copy()
+    # XLSX resources parse PriceUpdatedDate as a real datetime64 column, which pandas'
+    # to_json serializes as epoch milliseconds rather than an ISO string - normalize to
+    # a plain ISO string uniformly so CSV and XLSX months stage identically.
+    frame["PriceUpdatedDate"] = pd.to_datetime(
+        frame["PriceUpdatedDate"], errors="coerce"
+    ).dt.strftime("%Y-%m-%dT%H:%M:%S")
+    return frame
 
 
 def parse_aip_workbook(content: bytes) -> pd.DataFrame:
@@ -211,6 +277,7 @@ class LivePipeline:
         self.silver = f"{CATALOG}.{SCHEMA_PREFIX}_silver"
         self.monitoring = f"{CATALOG}.{SCHEMA_PREFIX}_monitoring"
         self.volume_root = f"/Volumes/{CATALOG}/{SCHEMA_PREFIX}_bronze/{RAW_VOLUME}"
+        self.code_version = git_commit_short()
 
     def validate_prerequisites(self) -> None:
         """Require the existing foundation and create only the raw artifact volume."""
@@ -222,6 +289,51 @@ class LivePipeline:
         self.client.execute(
             f"CREATE VOLUME IF NOT EXISTS {self.bronze}.{RAW_VOLUME} "
             "COMMENT 'Untouched official source artifacts for FuelSignal ingestion'"
+        )
+
+    def ensure_columns(self, table: str, columns: dict[str, str]) -> None:
+        """Idempotently add columns this phase introduced. Never drops or recreates tables."""
+        result = self.client.execute(f"DESCRIBE TABLE {table}")
+        existing = {
+            row[0]
+            for row in result.get("result", {}).get("data_array", [])
+            if row and row[0] and not str(row[0]).startswith("#")
+        }
+        missing = {name: dtype for name, dtype in columns.items() if name not in existing}
+        if not missing:
+            return
+        additions = ", ".join(f"{name} {dtype}" for name, dtype in missing.items())
+        self.client.execute(f"ALTER TABLE {table} ADD COLUMNS ({additions})")
+
+    def run_migrations(self) -> None:
+        """Add the columns this phase requires to already-deployed tables."""
+        self.ensure_columns(
+            f"{self.bronze}.bronze_ingestion_audit",
+            {
+                "stage": "STRING",
+                "source_file": "STRING",
+                "source_checksum": "STRING",
+                "records_read": "LONG",
+                "records_written": "LONG",
+                "records_rejected": "LONG",
+                "source_date_range": "STRING",
+                "code_version": "STRING",
+            },
+        )
+        self.ensure_columns(
+            f"{self.silver}.silver_station_master",
+            {
+                "official_station_code": "STRING",
+                "match_method": "STRING",
+                "match_confidence": "DOUBLE",
+                "effective_from": "DATE",
+                "effective_to": "DATE",
+                "ingested_at": "TIMESTAMP",
+            },
+        )
+        self.ensure_columns(
+            f"{self.silver}.silver_competitor_pairs",
+            {"created_at": "TIMESTAMP"},
         )
 
     def upload(self, name: str, content: bytes) -> str:
@@ -244,8 +356,23 @@ class LivePipeline:
             )
         return remote_path
 
+    def last_checksum(self, source_name: str, source_file: str) -> str | None:
+        """Return the checksum of the last successful ingest of a specific source file."""
+        result = self.client.execute(
+            f"""
+            SELECT source_checksum FROM {self.bronze}.bronze_ingestion_audit
+            WHERE source_name = {sql_literal(source_name)}
+              AND source_file = {sql_literal(source_file)}
+              AND status = 'success'
+            ORDER BY ingestion_end_at DESC
+            LIMIT 1
+            """
+        )
+        rows = result.get("result", {}).get("data_array", [])
+        return rows[0][0] if rows and rows[0] else None
+
     def merge_fuelcheck(self, path: str, source_url: str, source_file_name: str) -> None:
-        """Merge FuelCheck price and station rows by deterministic source hashes."""
+        """Merge one month of FuelCheck price and station rows by deterministic source hashes."""
         run_id = sql_literal(self.run_id)
         url = sql_literal(source_url)
         file_name = sql_literal(source_file_name)
@@ -286,57 +413,63 @@ class LivePipeline:
         )
         self.client.execute(
             f"""
-                        MERGE INTO {self.bronze}.bronze_fuelcheck_stations_raw AS target
-                        USING (
-                            SELECT DISTINCT
-                                sha2(concat_ws('||', ServiceStationName, Address, cast(Postcode AS STRING)), 256) station_code,
-                                cast(ServiceStationName AS STRING) station_name,
-                                cast(Brand AS STRING) brand,
-                                cast(Address AS STRING) address,
-                                cast(Suburb AS STRING) suburb,
-                                'NSW' state,
-                                cast(Postcode AS STRING) postcode,
-                                cast(NULL AS DOUBLE) latitude,
-                                cast(NULL AS DOUBLE) longitude,
-                                cast(NULL AS STRING) station_type,
-                                to_json(named_struct('ServiceStationName', ServiceStationName, 'Address', Address,
-                                    'Suburb', Suburb, 'Postcode', Postcode, 'Brand', Brand)) raw_json,
-                                current_timestamp() _ingested_at,
-                                'nsw_fuelcheck' _source_name,
-                                {url} _source_url,
-                                {file_name} _source_file,
-                                sha2(concat_ws('||', ServiceStationName, Address, cast(Postcode AS STRING), Brand), 256) _source_record_hash,
-                                {run_id} _pipeline_run_id
-                            FROM {source}
-                        ) AS source
-                        ON target._source_record_hash = source._source_record_hash
-                        WHEN NOT MATCHED THEN INSERT *
+            MERGE INTO {self.bronze}.bronze_fuelcheck_stations_raw AS target
+            USING (
+                SELECT DISTINCT
+                    sha2(concat_ws('||', ServiceStationName, Address, cast(Postcode AS STRING)), 256) station_code,
+                    cast(ServiceStationName AS STRING) station_name,
+                    cast(Brand AS STRING) brand,
+                    cast(Address AS STRING) address,
+                    cast(Suburb AS STRING) suburb,
+                    'NSW' state,
+                    cast(Postcode AS STRING) postcode,
+                    cast(NULL AS DOUBLE) latitude,
+                    cast(NULL AS DOUBLE) longitude,
+                    cast(NULL AS STRING) station_type,
+                    to_json(named_struct('ServiceStationName', ServiceStationName, 'Address', Address,
+                        'Suburb', Suburb, 'Postcode', Postcode, 'Brand', Brand)) raw_json,
+                    current_timestamp() _ingested_at,
+                    'nsw_fuelcheck' _source_name,
+                    {url} _source_url,
+                    {file_name} _source_file,
+                    sha2(concat_ws('||', ServiceStationName, Address, cast(Postcode AS STRING), Brand), 256) _source_record_hash,
+                    {run_id} _pipeline_run_id
+                FROM {source}
+            ) AS source
+            ON target._source_record_hash = source._source_record_hash
+            WHEN NOT MATCHED THEN INSERT *
             """
         )
 
-    def clean_current_fuelcheck_resource(self) -> None:
-        """Remove prior parser artifacts for the current official FuelCheck file only."""
-        current_resource = "_source_name = 'nsw_fuelcheck' AND _source_file IN ("
-        current_resource += "'fuelcheck_march_2026.csv', "
-        current_resource += "'fuelcheck_march_2026_staging.csv', "
-        current_resource += "'fuelcheck_march_2026_staging.jsonl')"
+    def merge_station_reference(self, path: str) -> None:
+        """Merge official FuelCheck station reference rows (with coordinates) by content hash."""
+        source = f"read_files({sql_literal(path)}, format => 'json')"
         self.client.execute(
             f"""
-            DELETE FROM {self.silver}.silver_data_quality_issues
-            WHERE record_identifier IN (
-              SELECT _source_record_hash
-              FROM {self.bronze}.bronze_fuelcheck_prices_raw
-              WHERE {current_resource}
-            )
-            """
-        )
-        self.client.execute(
-            f"DELETE FROM {self.bronze}.bronze_fuelcheck_prices_raw WHERE {current_resource}"
-        )
-        self.client.execute(
-            f"""
-            DELETE FROM {self.bronze}.bronze_fuelcheck_stations_raw
-            WHERE {current_resource}
+            MERGE INTO {self.bronze}.bronze_fuelcheck_stations_raw AS target
+            USING (
+              SELECT
+                cast(station_code AS STRING) station_code,
+                cast(station_name AS STRING) station_name,
+                cast(brand AS STRING) brand,
+                cast(address AS STRING) address,
+                cast(suburb AS STRING) suburb,
+                cast(state AS STRING) state,
+                cast(postcode AS STRING) postcode,
+                cast(latitude AS DOUBLE) latitude,
+                cast(longitude AS DOUBLE) longitude,
+                cast(station_type AS STRING) station_type,
+                cast(raw_json AS STRING) raw_json,
+                try_cast(_ingested_at AS TIMESTAMP) _ingested_at,
+                cast(_source_name AS STRING) _source_name,
+                cast(_source_url AS STRING) _source_url,
+                cast(_source_file AS STRING) _source_file,
+                cast(_source_record_hash AS STRING) _source_record_hash,
+                cast(_pipeline_run_id AS STRING) _pipeline_run_id
+              FROM {source}
+            ) AS source
+            ON target._source_record_hash = source._source_record_hash
+            WHEN NOT MATCHED THEN INSERT *
             """
         )
 
@@ -380,16 +513,8 @@ class LivePipeline:
         )
 
     def write_quality_issues(self) -> None:
-        """Persist FuelCheck, TGP, and holiday rule violations without deletion."""
+        """Persist TGP and holiday rule violations without deletion."""
         rules = [
-            (
-                "fuelcheck_coordinates_present",
-                "bronze_fuelcheck_prices_raw",
-                "silver_fuel_prices",
-                "latitude IS NULL OR longitude IS NULL OR latitude NOT BETWEEN -37.5 AND -28.0 OR longitude NOT BETWEEN 141.0 AND 154.0",
-                "latitude,longitude",
-                "Missing or invalid NSW station coordinates",
-            ),
             (
                 "fuelcheck_price_bounds",
                 "bronze_fuelcheck_prices_raw",
@@ -446,8 +571,42 @@ class LivePipeline:
                 """
             )
 
+    def write_unmatched_station_issues(self) -> None:
+        """Flag bronze price rows whose station could not be resolved to a coordinate.
+
+        This is the actionable reason a otherwise-valid price row does not reach
+        silver_fuel_prices: the FuelCheck bulk archive never carries coordinates
+        directly, so every row depends on a normalized address+postcode match
+        against silver_station_master (populated from the live reference API).
+        """
+        match_bronze = normalize_key_sql("p.address", "p.postcode")
+        match_silver = normalize_key_sql("sm.address", "sm.postcode")
+        self.client.execute(
+            f"""
+            MERGE INTO {self.silver}.silver_data_quality_issues AS target
+            USING (
+              SELECT sha2(concat_ws('||', p._source_record_hash, 'fuelcheck_station_unmatched'), 256) issue_id,
+                {sql_literal(self.run_id)} pipeline_run_id,
+                {sql_literal(self.bronze + '.bronze_fuelcheck_prices_raw')} source_table,
+                {sql_literal(self.silver + '.silver_fuel_prices')} target_table,
+                'fuelcheck_station_unmatched' rule_name, 'error' severity,
+                'address,postcode' column_name, p._source_record_hash record_identifier,
+                'Station address/postcode did not match any coordinate-bearing station_master row' issue_description,
+                p.address raw_value, 'quarantined' action_taken, current_timestamp() detected_at
+              FROM {self.bronze}.bronze_fuelcheck_prices_raw p
+              LEFT JOIN {self.silver}.silver_station_master sm
+                ON {match_bronze} = {match_silver}
+              WHERE sm.station_id IS NULL
+                AND try_cast(p.last_updated AS TIMESTAMP) IS NOT NULL
+                AND p.price BETWEEN 80 AND 300
+            ) AS source
+            ON target.issue_id = source.issue_id
+            WHEN NOT MATCHED THEN INSERT *
+            """
+        )
+
     def transform_silver(self) -> None:
-        """Merge valid first-stage canonical TGP and holiday records."""
+        """Merge valid canonical TGP and holiday records."""
         self.client.execute(
             f"""
                         MERGE INTO {self.silver}.silver_terminal_gate_prices AS target
@@ -486,6 +645,234 @@ class LivePipeline:
                         """
         )
 
+    def build_station_master(self) -> None:
+        """Crosswalk official (coordinate-bearing) stations against the bulk price archive.
+
+        The bulk archive never carries an official station code, so the only viable
+        deterministic join key is normalized address+postcode. Matches are only
+        inserted when both sides resolve to exactly one station for that key;
+        anything ambiguous or unresolved is reported via silver_data_quality_issues
+        instead of being guessed.
+        """
+        run_id = sql_literal(self.run_id)
+        match_key_expr = normalize_key_sql("address", "postcode")
+        # Shared CTEs: match_key is computed once per side (bare column references,
+        # since these subqueries define their own row context) and then only ever
+        # referenced via the already-materialized alias.match_key downstream - never
+        # recomputed against an alias that doesn't exist yet in that scope.
+        common_ctes = f"""
+            WITH official AS (
+              SELECT station_code, station_name, brand, address, suburb, postcode, state,
+                latitude, longitude, {match_key_expr} match_key,
+                row_number() OVER (PARTITION BY station_code ORDER BY _ingested_at DESC) rn
+              FROM {self.bronze}.bronze_fuelcheck_stations_raw
+              WHERE _source_name = 'nsw_fuelcheck_api_reference'
+            ),
+            official_dedup AS (
+              SELECT * FROM official WHERE rn = 1
+            ),
+            official_counts AS (
+              SELECT match_key, count(DISTINCT station_code) n FROM official_dedup GROUP BY match_key
+            ),
+            bulk AS (
+              SELECT DISTINCT station_code, address, postcode, {match_key_expr} match_key
+              FROM {self.bronze}.bronze_fuelcheck_stations_raw
+              WHERE _source_name = 'nsw_fuelcheck'
+            ),
+            bulk_counts AS (
+              SELECT match_key, count(DISTINCT station_code) n FROM bulk GROUP BY match_key
+            )
+        """
+
+        # Step 1: confident 1:1 matches (official station <-> bulk-archive station).
+        self.client.execute(
+            f"""
+            {common_ctes}
+            MERGE INTO {self.silver}.silver_station_master AS target
+            USING (
+              SELECT
+                sha2(o.station_code, 256) station_id,
+                o.station_code station_code, o.station_name station_name, o.brand brand,
+                upper(o.brand) brand_normalized, o.address address, o.suburb suburb,
+                o.postcode postcode, o.state state, o.latitude latitude, o.longitude longitude,
+                true is_active, current_date() first_seen_date, current_date() last_seen_date,
+                'nsw_fuelcheck_api_reference' source_name, {run_id} _pipeline_run_id,
+                o.station_code official_station_code, 'exact_address_postcode' match_method,
+                cast(1.0 AS DOUBLE) match_confidence, current_date() effective_from,
+                cast(NULL AS DATE) effective_to, current_timestamp() ingested_at
+              FROM official_dedup o
+              JOIN bulk b ON o.match_key = b.match_key
+              JOIN official_counts oc ON oc.match_key = o.match_key
+              JOIN bulk_counts bc ON bc.match_key = b.match_key
+              WHERE oc.n = 1 AND bc.n = 1
+            ) AS source
+            ON target.station_id = source.station_id
+            WHEN MATCHED THEN UPDATE SET *
+            WHEN NOT MATCHED THEN INSERT *
+            """
+        )
+
+        # Step 2: official stations with no bulk-archive counterpart yet - still
+        # legitimate, coordinate-bearing, officially-sourced stations.
+        self.client.execute(
+            f"""
+            {common_ctes}
+            MERGE INTO {self.silver}.silver_station_master AS target
+            USING (
+              SELECT
+                sha2(o.station_code, 256) station_id,
+                o.station_code station_code, o.station_name station_name, o.brand brand,
+                upper(o.brand) brand_normalized, o.address address, o.suburb suburb,
+                o.postcode postcode, o.state state, o.latitude latitude, o.longitude longitude,
+                true is_active, current_date() first_seen_date, current_date() last_seen_date,
+                'nsw_fuelcheck_api_reference' source_name, {run_id} _pipeline_run_id,
+                o.station_code official_station_code, 'reference_only_no_bulk_match' match_method,
+                cast(1.0 AS DOUBLE) match_confidence, current_date() effective_from,
+                cast(NULL AS DATE) effective_to, current_timestamp() ingested_at
+              FROM official_dedup o
+              LEFT JOIN bulk b ON o.match_key = b.match_key
+              WHERE b.match_key IS NULL
+            ) AS source
+            ON target.station_id = source.station_id
+            WHEN NOT MATCHED THEN INSERT *
+            """
+        )
+
+        # Step 3: ambiguous matches (a normalized key maps to >1 distinct station on
+        # either side) - quarantined, never guessed.
+        self.client.execute(
+            f"""
+            {common_ctes}
+            MERGE INTO {self.silver}.silver_data_quality_issues AS target
+            USING (
+              SELECT sha2(concat_ws('||', o.station_code, 'station_match_ambiguous'), 256) issue_id,
+                {run_id} pipeline_run_id,
+                {sql_literal(self.bronze + ".bronze_fuelcheck_stations_raw")} source_table,
+                {sql_literal(self.silver + ".silver_station_master")} target_table,
+                'station_match_ambiguous' rule_name, 'warning' severity,
+                'address,postcode' column_name, o.station_code record_identifier,
+                'Normalized address+postcode key matches more than one station on the official or bulk side' issue_description,
+                o.address raw_value, 'quarantined' action_taken, current_timestamp() detected_at
+              FROM official_dedup o
+              JOIN bulk b ON o.match_key = b.match_key
+              JOIN official_counts oc ON oc.match_key = o.match_key
+              JOIN bulk_counts bc ON bc.match_key = b.match_key
+              WHERE oc.n > 1 OR bc.n > 1
+            ) AS source
+            ON target.issue_id = source.issue_id
+            WHEN NOT MATCHED THEN INSERT *
+            """
+        )
+
+        # Step 4: bulk-archive stations with no official counterpart at all - no
+        # coordinates are available for these; report, never fabricate.
+        self.client.execute(
+            f"""
+            {common_ctes}
+            MERGE INTO {self.silver}.silver_data_quality_issues AS target
+            USING (
+              SELECT sha2(concat_ws('||', b.station_code, 'station_unmatched_no_coordinates'), 256) issue_id,
+                {run_id} pipeline_run_id,
+                {sql_literal(self.bronze + ".bronze_fuelcheck_stations_raw")} source_table,
+                {sql_literal(self.silver + ".silver_station_master")} target_table,
+                'station_unmatched_no_coordinates' rule_name, 'error' severity,
+                'address,postcode' column_name, b.station_code record_identifier,
+                'No official FuelCheck reference station shares this normalized address+postcode - no coordinates available' issue_description,
+                b.address raw_value, 'quarantined' action_taken, current_timestamp() detected_at
+              FROM bulk b
+              LEFT JOIN official_dedup o ON o.match_key = b.match_key
+              WHERE o.match_key IS NULL
+            ) AS source
+            ON target.issue_id = source.issue_id
+            WHEN NOT MATCHED THEN INSERT *
+            """
+        )
+
+    def transform_fuel_prices_silver(self) -> None:
+        """Populate silver_fuel_prices for price rows resolved to a coordinate-bearing station."""
+        match_bronze = normalize_key_sql("p.address", "p.postcode")
+        match_silver = normalize_key_sql("sm.address", "sm.postcode")
+        self.client.execute(
+            f"""
+            MERGE INTO {self.silver}.silver_fuel_prices AS target
+            USING (
+              SELECT sm.station_id station_id, p.station_name station_name, p.brand brand,
+                p.address address, p.suburb suburb, p.postcode postcode,
+                sm.latitude latitude, sm.longitude longitude,
+                upper(trim(p.fuel_type)) fuel_type,
+                try_cast(p.last_updated AS TIMESTAMP) observed_at,
+                date(try_cast(p.last_updated AS TIMESTAMP)) observed_date,
+                p.price price_cpl, p._source_name source_name, p._ingested_at ingested_at,
+                {sql_literal(self.run_id)} _pipeline_run_id
+              FROM {self.bronze}.bronze_fuelcheck_prices_raw p
+              JOIN {self.silver}.silver_station_master sm ON {match_bronze} = {match_silver}
+              WHERE try_cast(p.last_updated AS TIMESTAMP) IS NOT NULL
+                AND p.price BETWEEN 80 AND 300
+            ) AS source
+            ON target.station_id = source.station_id
+              AND target.fuel_type = source.fuel_type
+              AND target.observed_at = source.observed_at
+            WHEN NOT MATCHED THEN INSERT *
+            """
+        )
+
+    def build_competitor_pairs(self) -> None:
+        """Compute 5km competitor pairs via Haversine with a bounding-box pre-filter.
+
+        Pairs are stored in a single direction (station_id < competitor_station_id)
+        since the relationship is symmetric; consumers needing a per-station lookup
+        should query both columns.
+        """
+        radius_km = 5.0
+        # ~0.06 deg latitude and ~0.07 deg longitude both exceed 5km at NSW latitudes,
+        # giving a safe pre-filter before the exact Haversine calculation below.
+        self.client.execute(
+            f"""
+            MERGE INTO {self.silver}.silver_competitor_pairs AS target
+            USING (
+              SELECT station_id, competitor_station_id, distance_km FROM (
+                SELECT a.station_id station_id, b.station_id competitor_station_id,
+                  6371 * acos(least(1.0, greatest(-1.0,
+                    cos(radians(a.latitude)) * cos(radians(b.latitude)) * cos(radians(b.longitude) - radians(a.longitude))
+                    + sin(radians(a.latitude)) * sin(radians(b.latitude))
+                  ))) distance_km
+                FROM {self.silver}.silver_station_master a
+                JOIN {self.silver}.silver_station_master b
+                  ON a.station_id < b.station_id
+                  AND b.latitude BETWEEN a.latitude - 0.06 AND a.latitude + 0.06
+                  AND b.longitude BETWEEN a.longitude - 0.07 AND a.longitude + 0.07
+                WHERE a.is_active AND b.is_active
+              )
+              WHERE distance_km <= {radius_km}
+            ) AS source
+            ON target.station_id = source.station_id AND target.competitor_station_id = source.competitor_station_id
+            WHEN MATCHED THEN UPDATE SET distance_km = source.distance_km
+            WHEN NOT MATCHED THEN INSERT (station_id, competitor_station_id, distance_km,
+              effective_from, effective_to, calculation_method, _pipeline_run_id, created_at)
+              VALUES (source.station_id, source.competitor_station_id, source.distance_km,
+                current_date(), NULL, 'haversine_bbox_prefilter_single_direction',
+                {sql_literal(self.run_id)}, current_timestamp())
+            """
+        )
+
+    def write_monitoring_dq_results(self) -> None:
+        """Summarize this run's data-quality outcomes into monitoring_data_quality_results."""
+        self.client.execute(
+            f"""
+            INSERT INTO {self.monitoring}.monitoring_data_quality_results
+            SELECT {sql_literal(self.run_id)} run_id, current_timestamp() check_timestamp,
+              target_table table_name, rule_name, issue_description rule_description,
+              severity, cast(NULL AS LONG) total_records, cast(NULL AS LONG) passed_records,
+              count(*) failed_records, cast(NULL AS DOUBLE) pass_rate,
+              cast(NULL AS DOUBLE) threshold,
+              CASE WHEN severity = 'error' THEN 'fail' ELSE 'warn' END status,
+              to_json(named_struct('source_table', source_table)) details
+            FROM {self.silver}.silver_data_quality_issues
+            WHERE pipeline_run_id = {sql_literal(self.run_id)}
+            GROUP BY target_table, rule_name, issue_description, severity, source_table
+            """
+        )
+
     def update_quarantine_metrics(self) -> None:
         """Write current source rejection counts to monitoring_pipeline_runs."""
         rejected = self.count(
@@ -513,10 +900,17 @@ class LivePipeline:
         source_count: int,
         status: str,
         error: str | None = None,
+        stage: str = "bronze",
+        source_file: str = "default",
+        source_checksum: str | None = None,
+        records_read: int | None = None,
+        records_written: int | None = None,
+        records_rejected: int | None = None,
+        source_date_range: str | None = None,
     ) -> None:
-        """Upsert one source run into both required audit tables and freshness."""
+        """Upsert one source-file run into audit, monitoring, and freshness tables."""
         completed_at = datetime.now(timezone.utc)
-        source_run_id = f"{self.run_id}:{source_name}"
+        source_run_id = f"{self.run_id}:{source_name}:{source_file}"
         self.client.execute(
             f"""
             MERGE INTO {self.bronze}.bronze_ingestion_audit AS target
@@ -526,7 +920,14 @@ class LivePipeline:
               try_cast({sql_literal(completed_at.isoformat())} AS TIMESTAMP) ingestion_end_at,
               {duration} duration_seconds, {source_count} record_count,
               {sql_literal(status)} status, {sql_literal(error)} error_message,
-              'dev' environment, current_timestamp() _ingested_at) AS source
+              'dev' environment, current_timestamp() _ingested_at,
+              {sql_literal(stage)} stage, {sql_literal(source_file)} source_file,
+              {sql_literal(source_checksum)} source_checksum,
+              {"NULL" if records_read is None else records_read} records_read,
+              {"NULL" if records_written is None else records_written} records_written,
+              {"NULL" if records_rejected is None else records_rejected} records_rejected,
+              {sql_literal(source_date_range)} source_date_range,
+              {sql_literal(self.code_version)} code_version) AS source
             ON target.pipeline_run_id = source.pipeline_run_id
             WHEN NOT MATCHED THEN INSERT *
             """
@@ -535,13 +936,13 @@ class LivePipeline:
             f"""
             MERGE INTO {self.monitoring}.monitoring_pipeline_runs AS target
             USING (SELECT {sql_literal(source_run_id)} run_id,
-              {sql_literal('ingest_' + source_name)} pipeline_name, 'bronze' stage,
+              {sql_literal('ingest_' + source_name)} pipeline_name, {sql_literal(stage)} stage,
               try_cast({sql_literal(started_at.isoformat())} AS TIMESTAMP) started_at,
               try_cast({sql_literal(completed_at.isoformat())} AS TIMESTAMP) completed_at,
               {duration} duration_seconds, {sql_literal(status)} status,
               {source_count} records_read, {source_count} records_written,
               cast(NULL AS BIGINT) records_quarantined, {sql_literal(error)} error_message,
-              'dev' environment, {sql_literal(json.dumps({'source_url': source_url}))} parameters) source
+              'dev' environment, {sql_literal(json.dumps({"source_url": source_url}))} parameters) source
             ON target.run_id = source.run_id
             WHEN NOT MATCHED THEN INSERT *
             """
@@ -565,8 +966,121 @@ class LivePipeline:
         return int(result["result"]["data_array"][0][0])
 
 
+def ingest_fuelcheck_history(
+    pipeline: LivePipeline,
+    historical_resources: list[dict[str, str]],
+    timeout: int,
+    retries: int,
+) -> dict[str, Any]:
+    """Download and merge each configured historical month, skipping unchanged files."""
+    summary = {
+        "months_processed": 0,
+        "months_skipped_unchanged": 0,
+        "months_failed": [],
+        "total_rows": 0,
+    }
+    for resource in historical_resources:
+        month = resource["month"]
+        url = resource["url"]
+        filename = Path(url).name
+        started_at = datetime.now(timezone.utc)
+        try:
+            content, duration = fetch_required(url, timeout=timeout, retries=retries)
+            checksum = sha256_bytes(content)
+            previous_checksum = pipeline.last_checksum("nsw_fuelcheck", filename)
+            if previous_checksum == checksum:
+                summary["months_skipped_unchanged"] += 1
+                print(f"  {month} ({filename}): unchanged, skipped", file=sys.stderr)
+                continue
+
+            frame = parse_fuelcheck_month(content, filename)
+            row_count = len(frame)
+            staging_path = pipeline.upload(
+                f"fuelcheck_{month}_staging.jsonl", dataframe_jsonl_bytes(frame)
+            )
+            pipeline.merge_fuelcheck(staging_path, url, filename)
+            pipeline.write_audit(
+                "nsw_fuelcheck",
+                url,
+                started_at,
+                duration,
+                row_count,
+                "success",
+                stage="bronze",
+                source_file=filename,
+                source_checksum=checksum,
+                records_read=row_count,
+                records_written=row_count,
+                records_rejected=0,
+                source_date_range=month,
+            )
+            summary["months_processed"] += 1
+            summary["total_rows"] += row_count
+            print(f"  {month} ({filename}): merged {row_count} rows", file=sys.stderr)
+        except (requests.RequestException, RuntimeError) as exc:
+            pipeline.write_audit(
+                "nsw_fuelcheck",
+                url,
+                started_at,
+                (datetime.now(timezone.utc) - started_at).total_seconds(),
+                0,
+                "failed",
+                error=str(exc)[:500],
+                stage="bronze",
+                source_file=filename,
+                source_date_range=month,
+            )
+            summary["months_failed"].append({"month": month, "error": str(exc)[:200]})
+            print(f"  {month} ({filename}): FAILED - {exc}", file=sys.stderr)
+    return summary
+
+
+def ingest_station_reference(pipeline: LivePipeline) -> dict[str, Any]:
+    """Fetch and merge the live official station reference dataset."""
+    started_at = datetime.now(timezone.utc)
+    ingester = FuelCheckStationReferenceIngester()
+    try:
+        payload = ingester.fetch()
+        records = ingester.to_raw_records(payload)
+        frame = pd.DataFrame(records)
+        staging_path = pipeline.upload(
+            "fuelcheck_referencedata_lovs_staging.jsonl", dataframe_jsonl_bytes(frame)
+        )
+        pipeline.merge_station_reference(staging_path)
+        duration = (datetime.now(timezone.utc) - started_at).total_seconds()
+        pipeline.write_audit(
+            "nsw_fuelcheck_api_reference",
+            ingester.metadata["data_url"],
+            started_at,
+            duration,
+            len(records),
+            "success",
+            stage="bronze",
+            source_file="fuelcheck_referencedata_lovs",
+            records_read=len(records),
+            records_written=len(records),
+            records_rejected=0,
+        )
+        return {"status": "success", "record_count": len(records)}
+    except (FuelCheckAuthError, requests.RequestException, RuntimeError) as exc:
+        duration = (datetime.now(timezone.utc) - started_at).total_seconds()
+        pipeline.write_audit(
+            "nsw_fuelcheck_api_reference",
+            "https://api.onegov.nsw.gov.au/FuelCheckRefData/v2/fuel/lovs",
+            started_at,
+            duration,
+            0,
+            "failed",
+            error=str(exc)[:500],
+            stage="bronze",
+            source_file="fuelcheck_referencedata_lovs",
+        )
+        return {"status": "failed", "error": str(exc)[:300]}
+
+
 def main() -> int:
     """Download all required sources and execute the live pipeline."""
+    load_env()
     run_id = f"ingest-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:8]}"
     host, token = databricks_auth()
     sources = load_sources_config()["sources"]
@@ -580,74 +1094,88 @@ def main() -> int:
 
     try:
         pipeline.validate_prerequisites()
-        downloaded: dict[str, dict[str, Any]] = {}
-        for key in ("nsw_fuelcheck", "aip_terminal_gate_prices", "nsw_public_holidays"):
-            source = sources[key]
-            url = source["resolved_download_url"]
-            started_at = datetime.now(timezone.utc)
-            content, duration = fetch_required(
-                url,
-                timeout=pipeline_config["request_timeout_seconds"],
-                retries=pipeline_config["max_retry_attempts"],
-            )
-            downloaded[key] = {
-                "url": url,
-                "content": content,
-                "duration": duration,
-                "started_at": started_at,
-                "sha256": sha256_bytes(content),
-            }
+        pipeline.run_migrations()
 
-        fuel = downloaded["nsw_fuelcheck"]
-        pipeline.upload("fuelcheck_march_2026.csv", fuel["content"])
-        fuel_frame = pd.read_csv(io.BytesIO(fuel["content"]), dtype={"Postcode": str})
-        fuel_count = len(fuel_frame)
-        fuel_staging_path = pipeline.upload(
-            "fuelcheck_march_2026_staging.jsonl", dataframe_jsonl_bytes(fuel_frame)
-        )
-        pipeline.clean_current_fuelcheck_resource()
-        pipeline.merge_fuelcheck(fuel_staging_path, fuel["url"], "fuelcheck_march_2026.csv")
-        pipeline.write_audit(
-            "nsw_fuelcheck",
-            fuel["url"],
-            fuel["started_at"],
-            fuel["duration"],
-            fuel_count,
-            "success",
+        print("Fetching official station reference data...", file=sys.stderr)
+        station_ref_summary = ingest_station_reference(pipeline)
+
+        print("Ingesting FuelCheck historical price archive...", file=sys.stderr)
+        fuelcheck_summary = ingest_fuelcheck_history(
+            pipeline,
+            sources["nsw_fuelcheck"]["historical_resources"],
+            timeout=pipeline_config["request_timeout_seconds"],
+            retries=pipeline_config["max_retry_attempts"],
         )
 
-        aip = downloaded["aip_terminal_gate_prices"]
-        aip_frame = parse_aip_workbook(aip["content"])
-        pipeline.upload("aip_tgp_17_jul_2026.xlsx", aip["content"])
+        aip_source = sources["aip_terminal_gate_prices"]
+        aip_url = aip_source["resolved_download_url"]
+        aip_started_at = datetime.now(timezone.utc)
+        aip_content, aip_duration = fetch_required(
+            aip_url,
+            timeout=pipeline_config["request_timeout_seconds"],
+            retries=pipeline_config["max_retry_attempts"],
+        )
+        aip_frame = parse_aip_workbook(aip_content)
+        pipeline.upload(Path(aip_url).name, aip_content)
         aip_path = pipeline.upload("aip_tgp_staging.csv", dataframe_csv_bytes(aip_frame))
-        pipeline.merge_aip(aip_path, aip["url"])
+        pipeline.merge_aip(aip_path, aip_url)
         pipeline.write_audit(
             "aip_terminal_gate_prices",
-            aip["url"],
-            aip["started_at"],
-            aip["duration"],
+            aip_url,
+            aip_started_at,
+            aip_duration,
             len(aip_frame),
             "success",
+            stage="bronze",
+            source_file=Path(aip_url).name,
+            source_checksum=sha256_bytes(aip_content),
+            records_read=len(aip_frame),
+            records_written=len(aip_frame),
+            records_rejected=0,
         )
 
-        holidays = downloaded["nsw_public_holidays"]
-        holiday_frame = parse_holiday_page(holidays["content"])
-        pipeline.upload("nsw_public_holidays_2026_2027.html", holidays["content"])
+        holidays_source = sources["nsw_public_holidays"]
+        holidays_url = holidays_source["resolved_download_url"]
+        holidays_started_at = datetime.now(timezone.utc)
+        holidays_content, holidays_duration = fetch_required(
+            holidays_url,
+            timeout=pipeline_config["request_timeout_seconds"],
+            retries=pipeline_config["max_retry_attempts"],
+        )
+        holiday_frame = parse_holiday_page(holidays_content)
+        pipeline.upload("nsw_public_holidays_2026_2027.html", holidays_content)
         holiday_path = pipeline.upload(
             "nsw_public_holidays_staging.csv", dataframe_csv_bytes(holiday_frame)
         )
-        pipeline.merge_holidays(holiday_path, holidays["url"])
+        pipeline.merge_holidays(holiday_path, holidays_url)
         pipeline.write_audit(
             "nsw_public_holidays",
-            holidays["url"],
-            holidays["started_at"],
-            holidays["duration"],
+            holidays_url,
+            holidays_started_at,
+            holidays_duration,
             len(holiday_frame),
             "success",
+            stage="bronze",
+            source_file="nsw_public_holidays_2026_2027.html",
+            source_checksum=sha256_bytes(holidays_content),
+            records_read=len(holiday_frame),
+            records_written=len(holiday_frame),
+            records_rejected=0,
         )
 
+        print("Building silver_station_master crosswalk...", file=sys.stderr)
+        pipeline.build_station_master()
+
+        print("Transforming silver_fuel_prices...", file=sys.stderr)
+        pipeline.transform_fuel_prices_silver()
+
+        print("Building 5km competitor pairs...", file=sys.stderr)
+        pipeline.build_competitor_pairs()
+
         pipeline.write_quality_issues()
+        pipeline.write_unmatched_station_issues()
         pipeline.transform_silver()
+        pipeline.write_monitoring_dq_results()
         pipeline.update_quarantine_metrics()
 
         tables = [
@@ -659,17 +1187,17 @@ def main() -> int:
             f"{pipeline.silver}.silver_station_master",
             f"{pipeline.silver}.silver_terminal_gate_prices",
             f"{pipeline.silver}.silver_public_holidays",
+            f"{pipeline.silver}.silver_competitor_pairs",
             f"{pipeline.silver}.silver_data_quality_issues",
             f"{pipeline.bronze}.bronze_ingestion_audit",
             f"{pipeline.monitoring}.monitoring_pipeline_runs",
             f"{pipeline.monitoring}.monitoring_source_freshness",
+            f"{pipeline.monitoring}.monitoring_data_quality_results",
         ]
         summary = {
             "run_id": run_id,
-            "sources": {
-                key: {"url": value["url"], "sha256": value["sha256"]}
-                for key, value in downloaded.items()
-            },
+            "station_reference": station_ref_summary,
+            "fuelcheck_history": fuelcheck_summary,
             "row_counts": {table: pipeline.count(table) for table in tables},
         }
         print(json.dumps(summary, indent=2, sort_keys=True))

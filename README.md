@@ -68,10 +68,14 @@ This platform supports daily pricing decisions by:
 
 | Source | Provider | Type | Usage |
 |--------|----------|------|-------|
-| [NSW FuelCheck](https://data.nsw.gov.au/data/dataset/fuel-check) | NSW Government | Station-level retail prices | Primary pricing data |
-| [AIP Terminal Gate Prices](https://www.aip.com.au/pricing/terminal-gate-prices) | Australian Institute of Petroleum | Wholesale prices | Margin calculation |
+| [NSW FuelCheck](https://data.nsw.gov.au/data/dataset/fuel-check) | NSW Government | Station-level retail prices, 18-month bulk archive (Jan 2025 - Jun 2026) | Primary pricing data |
+| [NSW FuelCheck Live Reference API](https://api.nsw.gov.au/Product/Index/22) | NSW Government (OneGov) | Official station code, brand, address, coordinates (live snapshot) | Station coordinates for the bulk archive above, which never carries them |
+| [AIP Terminal Gate Prices](https://www.aip.com.au/pricing/terminal-gate-prices) | Australian Institute of Petroleum | Wholesale prices, daily back to 2004 | Margin calculation |
 | [ACCC Petrol Price Cycles](https://www.accc.gov.au/consumers/petrol-and-fuel/petrol-price-cycles) | ACCC | Methodology reference | Cycle understanding |
 | [NSW Public Holidays](https://www.industrialrelations.nsw.gov.au/public-holidays/public-holidays-in-nsw) | NSW Government | Holiday calendar | Feature engineering |
+
+See [docs/data-sources.md](docs/data-sources.md) for the confirmed live OAuth2 flow, exact
+endpoint paths, and known pitfalls for the FuelCheck sources.
 
 ## 📁 Repository Structure
 
@@ -172,11 +176,13 @@ make lint
 | Gold table definitions | ✅ Complete |
 | Monitoring table definitions | ✅ Complete |
 | Public holidays ingestion | ✅ Complete |
-| FuelCheck ingestion | ⚠️ Partial (API registration may be needed) |
-| AIP TGP ingestion | ⚠️ Partial (HTML parsing refinement needed) |
-| Silver transformations | ✅ Complete |
-| Gold SQL window functions | ✅ Complete |
-| Competitor geospatial | ✅ Complete |
+| FuelCheck historical ingestion (18 months) | ✅ Complete |
+| FuelCheck live station-reference API (coordinates) | ✅ Complete (OAuth2 client-credentials) |
+| AIP TGP ingestion | ✅ Complete (single download already covers 2004-present) |
+| Station identity crosswalk (address+postcode) | ✅ Complete - see docs/data-quality.md |
+| Silver transformations (fuel prices, station master) | ✅ Complete |
+| Gold SQL window functions | ⚠️ Defined, not yet executed against populated Silver |
+| Competitor geospatial (5km Haversine) | ✅ Complete |
 | Data quality framework | ✅ Complete |
 | Unit tests | ✅ Complete |
 | CI/CD pipeline | ✅ Complete |
@@ -188,23 +194,36 @@ make lint
 ## ⚠️ Limitations
 
 1. **No ML models yet** — The data foundation must be validated before modelling
-2. **FuelCheck API** — May require registration for real-time access; historical bulk downloads via CKAN
-3. **AIP TGP** — Published as HTML tables; extraction requires maintenance when page structure changes
+2. **Station coverage is bounded by the live reference API's current snapshot** — a bulk
+   station that has closed/rebranded since the reference API was last queried, or whose
+   address text formatting doesn't match, will not resolve to a coordinate and is
+   quarantined rather than guessed (see docs/data-quality.md for exact rule names and
+   counts)
+3. **AIP TGP** — Published as HTML/XLSX; extraction requires maintenance when page/workbook structure changes
 4. **No volume data** — Public sources don't include sales volume; margin analysis is indicative only
 5. **Single state** — Currently NSW only; architecture supports multi-state expansion
-6. **Free-tier Databricks** — Some Unity Catalog features may be limited
+6. **Free-tier Databricks** — Some Unity Catalog features may be limited; the SQL warehouse
+   returned an unexplained `HTTP 403` mid-run once during a large historical backfill -
+   idempotent per-file checksums mean a retry safely resumes rather than reprocessing
+   everything
 
 ## 📋 Next Milestones
 
-1. **Data Population** — Complete FuelCheck historical data download and Bronze loading
-2. **Silver Validation** — Full pipeline run with quality metrics
-3. **Gold Materialization** — Execute window function queries on real data
-4. **Feature Store** — Register features for ML consumption
-5. **ML Model v1** — Binary classifier for 48-hour jump probability
-6. **Walk-forward Backtest** — 6-month out-of-sample validation
-7. **Recommendation Engine** — HOLD/FOLLOW/LEAD decision layer
-8. **Scheduling** — Databricks Jobs for daily automation
-9. **Power BI** — Reporting dashboard connected to Gold layer
+Week 1 (Foundation) is complete: station coordinates resolved, 18-month historical
+FuelCheck archive ingested (Jan 2025 - Jun 2026, 1,423,296 bronze rows), station identity
+crosswalk built (3098 coordinate-bearing stations), `silver_fuel_prices` populated
+(1,197,046 rows, ~84% match rate), 51,579 competitor pairs computed within 5km,
+audit/monitoring/DQ tables populated. Week 2 (Modelling) has **not** started. Next:
+
+1. **Gold Materialization** — Execute window function queries (cycle features,
+   competitor positioning, indicative margin) against the now-populated Silver layer
+2. **Feature Store** — Register features for ML consumption
+3. **ML Model v1** — Binary classifier for 48-hour jump probability, LightGBM vs a
+   rule-based baseline
+4. **Walk-forward Backtest** — 6-month out-of-sample validation
+5. **Recommendation Engine** — HOLD/FOLLOW/LEAD decision layer
+6. **Scheduling** — Databricks Jobs for daily automation
+7. **Power BI** — Reporting dashboard connected to Gold layer
 
 ## 📄 License
 
