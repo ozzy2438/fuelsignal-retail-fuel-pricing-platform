@@ -82,10 +82,20 @@ CATEGORICAL_COLUMNS = ["fuel_type"]
 TARGET_COLUMN = "jump_within_48h"
 
 
-def fetch_training_data(client: DatabricksSqlClient, fuel_types: list[str]) -> pd.DataFrame:
-    """Pull eligible rows for the approved fuel types: features + the 48h target."""
+def fetch_training_data(
+    client: DatabricksSqlClient, fuel_types: list[str], since_date: date | None = None
+) -> pd.DataFrame:
+    """Pull eligible rows for the approved fuel types: features + the 48h target.
+
+    `since_date`, when given, filters to `f.market_date >= since_date` - used by
+    scripts/score_daily.py to pull a bounded trailing window instead of the full
+    archive. Every walk-forward-validated caller (train_jump_model.py's own main(),
+    calibrate_thresholds.py, run_pricing_policy_backtest.py) needs the complete
+    history and leaves this at the default `None`.
+    """
     fuel_list = ", ".join(sql_literal(f) for f in fuel_types)
     columns_sql = ",\n              ".join(f"f.{c}" for c in FEATURE_COLUMNS)
+    date_filter = f" AND f.market_date >= DATE'{since_date.isoformat()}'" if since_date else ""
     sql = f"""
         SELECT f.station_id, f.fuel_type, f.market_date,
               {columns_sql},
@@ -95,7 +105,7 @@ def fetch_training_data(client: DatabricksSqlClient, fuel_types: list[str]) -> p
           ON f.station_id = e.station_id AND f.fuel_type = e.fuel_type AND e.is_eligible
         JOIN {GOLD_SCHEMA}.gold_price_jump_labels l
           ON f.fuel_type = l.fuel_type AND f.market_date = l.market_date
-        WHERE f.fuel_type IN ({fuel_list})
+        WHERE f.fuel_type IN ({fuel_list}){date_filter}
     """
     return client.execute_to_dataframe(sql)
 

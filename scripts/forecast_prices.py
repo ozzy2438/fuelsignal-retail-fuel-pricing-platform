@@ -82,15 +82,25 @@ CATEGORICAL_COLUMNS = ["fuel_type"]
 RESULTS_PATH = PROJECT_ROOT / "config" / "price_forecast_results.json"
 
 
-def fetch_market_price_series(client: DatabricksSqlClient, fuel_types: list[str]) -> pd.DataFrame:
-    """Pull the market-level (fuel_type x date) price series plus date-level context."""
+def fetch_market_price_series(
+    client: DatabricksSqlClient, fuel_types: list[str], since_date: date | None = None
+) -> pd.DataFrame:
+    """Pull the market-level (fuel_type x date) price series plus date-level context.
+
+    `since_date`, when given, filters both CTEs to `market_date >= since_date` - used
+    by scripts/score_daily.py to pull a bounded trailing window (enough for the 14-day
+    rolling features build_feature_frame computes) instead of the full archive.
+    Walk-forward-validated callers (forecast_prices.py's own main(),
+    run_pricing_policy_backtest.py) need the complete history and leave this `None`.
+    """
     fuel_list = ", ".join(sql_literal(f) for f in fuel_types)
+    date_filter = f" AND market_date >= DATE'{since_date.isoformat()}'" if since_date else ""
     sql = f"""
         WITH label_series AS (
             SELECT fuel_type, market_date, market_median_price_cpl,
                    market_daily_change_cpl, jump_today
             FROM {GOLD_SCHEMA}.gold_price_jump_labels
-            WHERE fuel_type IN ({fuel_list})
+            WHERE fuel_type IN ({fuel_list}){date_filter}
         ),
         context_features AS (
             SELECT fuel_type, market_date,
@@ -98,7 +108,7 @@ def fetch_market_price_series(client: DatabricksSqlClient, fuel_types: list[str]
                    MAX(CASE WHEN is_public_holiday THEN 1 ELSE 0 END) AS is_public_holiday,
                    AVG(tgp_7d_change_cpl) AS tgp_7d_change_cpl
             FROM {GOLD_SCHEMA}.gold_market_cycle_features
-            WHERE fuel_type IN ({fuel_list})
+            WHERE fuel_type IN ({fuel_list}){date_filter}
             GROUP BY fuel_type, market_date
         )
         SELECT l.fuel_type, l.market_date, l.market_median_price_cpl,
