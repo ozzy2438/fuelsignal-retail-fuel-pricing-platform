@@ -41,7 +41,6 @@ BRONZE_SCHEMAS = {
             'quality' = 'bronze'
         )
     """,
-    
     "bronze_fuelcheck_stations_raw": """
         CREATE TABLE IF NOT EXISTS {schema}.bronze_fuelcheck_stations_raw (
             station_code STRING,
@@ -69,7 +68,6 @@ BRONZE_SCHEMAS = {
             'quality' = 'bronze'
         )
     """,
-    
     "bronze_aip_tgp_raw": """
         CREATE TABLE IF NOT EXISTS {schema}.bronze_aip_tgp_raw (
             tgp_date STRING,
@@ -92,7 +90,6 @@ BRONZE_SCHEMAS = {
             'quality' = 'bronze'
         )
     """,
-    
     "bronze_public_holidays_raw": """
         CREATE TABLE IF NOT EXISTS {schema}.bronze_public_holidays_raw (
             date STRING,
@@ -113,7 +110,6 @@ BRONZE_SCHEMAS = {
             'quality' = 'bronze'
         )
     """,
-    
     "bronze_ingestion_audit": """
         CREATE TABLE IF NOT EXISTS {schema}.bronze_ingestion_audit (
             pipeline_run_id STRING,
@@ -140,14 +136,11 @@ BRONZE_SCHEMAS = {
 
 def get_bronze_ddl(schema: str) -> dict[str, str]:
     """Get all Bronze DDL statements with schema name applied.
-    
+
     Args:
         schema: Fully qualified schema name (e.g., 'main.fuelsignal_bronze')
-        
+
     Returns:
         Dictionary mapping table name to DDL statement.
     """
-    return {
-        name: ddl.format(schema=schema)
-        for name, ddl in BRONZE_SCHEMAS.items()
-    }
+    return {name: ddl.format(schema=schema) for name, ddl in BRONZE_SCHEMAS.items()}

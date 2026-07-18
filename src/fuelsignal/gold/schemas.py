@@ -28,7 +28,6 @@ GOLD_SCHEMAS = {
             'quality' = 'gold'
         )
     """,
-    
     "gold_market_cycle_features": """
         CREATE TABLE IF NOT EXISTS {schema}.gold_market_cycle_features (
             station_id STRING NOT NULL,
@@ -53,7 +52,6 @@ GOLD_SCHEMAS = {
             'quality' = 'gold'
         )
     """,
-    
     "gold_competitor_positioning": """
         CREATE TABLE IF NOT EXISTS {schema}.gold_competitor_positioning (
             station_id STRING NOT NULL,
@@ -76,7 +74,6 @@ GOLD_SCHEMAS = {
             'quality' = 'gold'
         )
     """,
-    
     "gold_indicative_margin": """
         CREATE TABLE IF NOT EXISTS {schema}.gold_indicative_margin (
             station_id STRING NOT NULL,
@@ -96,7 +93,6 @@ GOLD_SCHEMAS = {
             'quality' = 'gold'
         )
     """,
-    
     "gold_daily_pricing_inputs": """
         CREATE TABLE IF NOT EXISTS {schema}.gold_daily_pricing_inputs (
             station_id STRING NOT NULL,
@@ -132,7 +128,4 @@ GOLD_SCHEMAS = {
 
 def get_gold_ddl(schema: str) -> dict[str, str]:
     """Get all Gold DDL statements with schema name applied."""
-    return {
-        name: ddl.format(schema=schema)
-        for name, ddl in GOLD_SCHEMAS.items()
-    }
+    return {name: ddl.format(schema=schema) for name, ddl in GOLD_SCHEMAS.items()}

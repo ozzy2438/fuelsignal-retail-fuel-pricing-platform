@@ -5,11 +5,10 @@ Invalid records are never silently deleted - they are written to
 silver_data_quality_issues for review.
 """
 
-from datetime import datetime, timezone
-from typing import Any, Optional
 import uuid
+from datetime import datetime, timezone
+from typing import Any
 
-from fuelsignal.config import load_quality_config
 from fuelsignal.logging import get_logger
 
 logger = get_logger(__name__)
@@ -17,7 +16,7 @@ logger = get_logger(__name__)
 
 class QualityCheck:
     """Represents a single data quality check result."""
-    
+
     def __init__(
         self,
         rule_name: str,
@@ -33,7 +32,7 @@ class QualityCheck:
         self.total_records = 0
         self.passed_records = 0
         self.failed_records = 0
-    
+
     def add_issue(
         self,
         column_name: str,
@@ -43,29 +42,31 @@ class QualityCheck:
         action: str = "flag",
     ) -> None:
         """Record a quality issue."""
-        self.issues.append({
-            "issue_id": str(uuid.uuid4()),
-            "pipeline_run_id": "",  # Set by caller
-            "source_table": self.source_table,
-            "target_table": self.target_table,
-            "rule_name": self.rule_name,
-            "severity": self.severity,
-            "column_name": column_name,
-            "record_identifier": str(record_identifier),
-            "issue_description": description,
-            "raw_value": str(raw_value)[:500] if raw_value is not None else None,
-            "action_taken": action,
-            "detected_at": datetime.now(timezone.utc).isoformat(),
-        })
+        self.issues.append(
+            {
+                "issue_id": str(uuid.uuid4()),
+                "pipeline_run_id": "",  # Set by caller
+                "source_table": self.source_table,
+                "target_table": self.target_table,
+                "rule_name": self.rule_name,
+                "severity": self.severity,
+                "column_name": column_name,
+                "record_identifier": str(record_identifier),
+                "issue_description": description,
+                "raw_value": str(raw_value)[:500] if raw_value is not None else None,
+                "action_taken": action,
+                "detected_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         self.failed_records += 1
-    
+
     @property
     def pass_rate(self) -> float:
         """Calculate the pass rate."""
         if self.total_records == 0:
             return 0.0
         return (self.total_records - self.failed_records) / self.total_records
-    
+
     @property
     def summary(self) -> dict:
         """Return a summary of this quality check."""
@@ -81,7 +82,9 @@ class QualityCheck:
         }
 
 
-def check_not_null(records: list[dict], column: str, identifier_col: str = "station_id") -> QualityCheck:
+def check_not_null(
+    records: list[dict], column: str, identifier_col: str = "station_id"
+) -> QualityCheck:
     """Check that a column has no null values."""
     check = QualityCheck(
         rule_name=f"{column}_not_null",
@@ -90,7 +93,7 @@ def check_not_null(records: list[dict], column: str, identifier_col: str = "stat
         severity="critical",
     )
     check.total_records = len(records)
-    
+
     for record in records:
         value = record.get(column)
         if value is None or (isinstance(value, str) and value.strip() == ""):
@@ -101,7 +104,7 @@ def check_not_null(records: list[dict], column: str, identifier_col: str = "stat
                 raw_value=value,
                 action="quarantine",
             )
-    
+
     return check
 
 
@@ -120,7 +123,7 @@ def check_price_bounds(
         severity="warning",
     )
     check.total_records = len(records)
-    
+
     for record in records:
         price = record.get(column)
         if price is not None:
@@ -138,11 +141,11 @@ def check_price_bounds(
                 check.add_issue(
                     column_name=column,
                     record_identifier=record.get(identifier_col, "unknown"),
-                    description=f"Price value is not numeric",
+                    description="Price value is not numeric",
                     raw_value=price,
                     action="quarantine",
                 )
-    
+
     return check
 
 
@@ -160,11 +163,11 @@ def check_coordinates_nsw(
         severity="warning",
     )
     check.total_records = len(records)
-    
+
     for record in records:
         lat = record.get(lat_col)
         lon = record.get(lon_col)
-        
+
         if lat is None or lon is None:
             check.add_issue(
                 column_name=f"{lat_col}/{lon_col}",
@@ -174,7 +177,7 @@ def check_coordinates_nsw(
                 action="flag",
             )
             continue
-        
+
         try:
             lat_val = float(lat)
             lon_val = float(lon)
@@ -194,7 +197,7 @@ def check_coordinates_nsw(
                 raw_value=f"lat={lat}, lon={lon}",
                 action="quarantine",
             )
-    
+
     return check
 
 
@@ -211,7 +214,7 @@ def check_duplicates(
         severity="warning",
     )
     check.total_records = len(records)
-    
+
     seen_keys = {}
     for i, record in enumerate(records):
         key = tuple(str(record.get(col, "")) for col in key_columns)
@@ -225,5 +228,5 @@ def check_duplicates(
             )
         else:
             seen_keys[key] = i
-    
+
     return check

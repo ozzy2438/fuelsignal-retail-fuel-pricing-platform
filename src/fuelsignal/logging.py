@@ -7,12 +7,16 @@ NEVER logs secrets, tokens, or credentials.
 import logging
 import sys
 from datetime import datetime, timezone
-from typing import Optional
-
 
 SENSITIVE_KEYS = {
-    "token", "password", "secret", "key", "credential",
-    "DATABRICKS_TOKEN", "api_key", "auth",
+    "token",
+    "password",
+    "secret",
+    "key",
+    "credential",
+    "DATABRICKS_TOKEN",
+    "api_key",
+    "auth",
 }
 
 
@@ -32,30 +36,30 @@ def get_logger(
     include_timestamp: bool = True,
 ) -> logging.Logger:
     """Create a configured logger instance.
-    
+
     Args:
         name: Logger name (typically module __name__)
         level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         include_timestamp: Whether to include timestamp in format
-        
+
     Returns:
         Configured logger instance.
     """
     logger = logging.getLogger(name)
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
-    
+
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)
         handler.setLevel(getattr(logging, level.upper(), logging.INFO))
-        
+
         if include_timestamp:
             fmt = "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
         else:
             fmt = "%(name)s | %(levelname)s | %(message)s"
-        
+
         handler.setFormatter(logging.Formatter(fmt, datefmt="%Y-%m-%d %H:%M:%S"))
         logger.addHandler(handler)
-    
+
     return logger
 
 
@@ -64,17 +68,17 @@ def log_pipeline_event(
     event: str,
     stage: str,
     status: str = "info",
-    details: Optional[dict] = None,
+    details: dict | None = None,
 ) -> dict:
     """Log a structured pipeline event.
-    
+
     Args:
         logger: Logger instance
         event: Event description
         stage: Pipeline stage (bronze/silver/gold)
         status: Event status
         details: Additional event details (secrets will be redacted)
-        
+
     Returns:
         Event record dictionary for audit logging.
     """
@@ -86,7 +90,7 @@ def log_pipeline_event(
                 safe_details[k] = "[REDACTED]"
             else:
                 safe_details[k] = v
-    
+
     event_record = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "event": event,
@@ -94,12 +98,12 @@ def log_pipeline_event(
         "status": status,
         "details": safe_details,
     }
-    
+
     log_msg = f"[{stage}] {event}"
     if safe_details:
         log_msg += f" | {safe_details}"
-    
+
     log_level = getattr(logging, status.upper(), logging.INFO)
     logger.log(log_level, log_msg)
-    
+
     return event_record

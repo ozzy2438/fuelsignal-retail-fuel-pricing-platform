@@ -19,7 +19,7 @@ CONFIG_DIR = PROJECT_ROOT / "config"
 
 def load_env() -> None:
     """Load environment variables from .env file if it exists.
-    
+
     Only loads from .env file in the project root.
     Never logs or prints credential values.
     """
@@ -30,34 +30,34 @@ def load_env() -> None:
 
 def get_databricks_config() -> dict[str, str]:
     """Get Databricks connection configuration from environment variables.
-    
+
     Returns:
         Dictionary with host and token keys.
-        
+
     Raises:
         EnvironmentError: If required environment variables are not set.
     """
     load_env()
-    
+
     host = os.environ.get("DATABRICKS_HOST", "").strip()
     token = os.environ.get("DATABRICKS_TOKEN", "").strip()
-    
+
     if not host:
-        raise EnvironmentError(
+        raise OSError(
             "DATABRICKS_HOST environment variable is not set. "
             "Please set it to your Databricks workspace URL."
         )
     if not token:
-        raise EnvironmentError(
+        raise OSError(
             "DATABRICKS_TOKEN environment variable is not set. "
             "Please set it to your Databricks personal access token."
         )
-    
+
     # Normalize host URL
     if not host.startswith("https://"):
         host = f"https://{host}"
     host = host.rstrip("/")
-    
+
     return {
         "host": host,
         "token": token,
@@ -68,24 +68,22 @@ def get_databricks_config() -> dict[str, str]:
 
 def load_yaml_config(filename: str) -> dict[str, Any]:
     """Load a YAML configuration file from the config directory.
-    
+
     Args:
         filename: Name of the YAML file (e.g., 'project.yml')
-        
+
     Returns:
         Parsed YAML content as dictionary.
-        
+
     Raises:
         FileNotFoundError: If the config file doesn't exist.
         yaml.YAMLError: If the file contains invalid YAML.
     """
     config_path = CONFIG_DIR / filename
     if not config_path.exists():
-        raise FileNotFoundError(
-            f"Configuration file not found: {config_path}"
-        )
-    
-    with open(config_path, "r") as f:
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
+    with open(config_path) as f:
         return yaml.safe_load(f)
 
 
@@ -106,29 +104,28 @@ def load_quality_config() -> dict[str, Any]:
 
 def load_environment_config(environment: str = None) -> dict[str, Any]:
     """Load environment-specific configuration.
-    
+
     Args:
-        environment: Environment name (dev/staging/prod). 
+        environment: Environment name (dev/staging/prod).
                     Defaults to ENVIRONMENT env var or 'dev'.
     """
     if environment is None:
         environment = os.environ.get("ENVIRONMENT", "dev")
-    
+
     config = load_yaml_config("environments.yml")
     environments = config.get("environments", {})
-    
+
     if environment not in environments:
         raise ValueError(
-            f"Unknown environment '{environment}'. "
-            f"Available: {list(environments.keys())}"
+            f"Unknown environment '{environment}'. " f"Available: {list(environments.keys())}"
         )
-    
+
     return environments[environment]
 
 
 def get_schema_names(catalog: str = None, prefix: str = None) -> dict[str, str]:
     """Get fully qualified schema names.
-    
+
     Returns:
         Dictionary mapping layer names to full schema paths.
     """
@@ -137,7 +134,7 @@ def get_schema_names(catalog: str = None, prefix: str = None) -> dict[str, str]:
         catalog = db_config["catalog"]
     if prefix is None:
         prefix = os.environ.get("DATABRICKS_SCHEMA_PREFIX", "fuelsignal")
-    
+
     return {
         "bronze": f"{catalog}.{prefix}_bronze",
         "silver": f"{catalog}.{prefix}_silver",

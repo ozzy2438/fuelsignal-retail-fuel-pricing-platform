@@ -36,15 +36,16 @@ jobs:
 
       - name: Validate YAML configs
         run: |
-          python -c "
-import yaml
-from pathlib import Path
-for f in Path('config').glob('*.yml'):
-    print(f'Validating {f}...')
-    yaml.safe_load(f.read_text())
-    print(f'  OK')
-print('All YAML configs valid.')
-"
+          python - <<'EOF'
+          import yaml
+          from pathlib import Path
+
+          for f in Path("config").glob("*.yml"):
+              print(f"Validating {f}...")
+              yaml.safe_load(f.read_text())
+              print("  OK")
+          print("All YAML configs valid.")
+          EOF
 
       - name: Run unit tests
         run: |
@@ -82,33 +83,34 @@ print('All YAML configs valid.')
       
       - name: Validate all YAML files
         run: |
-          python -c "
-import yaml, sys
-from pathlib import Path
+          python - <<'EOF'
+          import sys
+          from pathlib import Path
 
-errors = []
-for f in Path('.').rglob('*.yml'):
-    try:
-        yaml.safe_load(f.read_text())
-    except yaml.YAMLError as e:
-        errors.append(f'{f}: {e}')
+          import yaml
 
-if errors:
-    for e in errors:
-        print(f'ERROR: {e}')
-    sys.exit(1)
-else:
-    print(f'All YAML files valid.')
-"
+          errors = []
+          for f in Path(".").rglob("*.yml"):
+              try:
+                  yaml.safe_load(f.read_text())
+              except yaml.YAMLError as e:
+                  errors.append(f"{f}: {e}")
+
+          if errors:
+              for e in errors:
+                  print(f"ERROR: {e}")
+              sys.exit(1)
+          print("All YAML files valid.")
+          EOF
 
       - name: Validate SQL files syntax
         run: |
-          python -c "
-from pathlib import Path
-for f in Path('sql').rglob('*.sql'):
-    content = f.read_text()
-    # Basic syntax check
-    assert len(content) > 10, f'{f} appears empty'
-    print(f'  {f}: OK ({len(content)} chars)')
-print('All SQL files have content.')
-"
+          python - <<'EOF'
+          from pathlib import Path
+
+          for f in Path("sql").rglob("*.sql"):
+              content = f.read_text()
+              assert len(content) > 10, f"{f} appears empty"
+              print(f"  {f}: OK ({len(content)} chars)")
+          print("All SQL files have content.")
+          EOF

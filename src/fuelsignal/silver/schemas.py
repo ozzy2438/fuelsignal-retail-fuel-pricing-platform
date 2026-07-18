@@ -30,7 +30,6 @@ SILVER_SCHEMAS = {
             'quality' = 'silver'
         )
     """,
-    
     "silver_station_master": """
         CREATE TABLE IF NOT EXISTS {schema}.silver_station_master (
             station_id STRING NOT NULL,
@@ -41,10 +40,10 @@ SILVER_SCHEMAS = {
             address STRING,
             suburb STRING,
             postcode STRING,
-            state STRING DEFAULT 'NSW',
+            state STRING,
             latitude DOUBLE NOT NULL,
             longitude DOUBLE NOT NULL,
-            is_active BOOLEAN DEFAULT TRUE,
+            is_active BOOLEAN,
             first_seen_date DATE,
             last_seen_date DATE,
             source_name STRING,
@@ -57,7 +56,6 @@ SILVER_SCHEMAS = {
             'quality' = 'silver'
         )
     """,
-    
     "silver_terminal_gate_prices": """
         CREATE TABLE IF NOT EXISTS {schema}.silver_terminal_gate_prices (
             tgp_date DATE NOT NULL,
@@ -76,7 +74,6 @@ SILVER_SCHEMAS = {
             'quality' = 'silver'
         )
     """,
-    
     "silver_public_holidays": """
         CREATE TABLE IF NOT EXISTS {schema}.silver_public_holidays (
             holiday_date DATE NOT NULL,
@@ -95,7 +92,6 @@ SILVER_SCHEMAS = {
             'quality' = 'silver'
         )
     """,
-    
     "silver_competitor_pairs": """
         CREATE TABLE IF NOT EXISTS {schema}.silver_competitor_pairs (
             station_id STRING NOT NULL,
@@ -103,7 +99,7 @@ SILVER_SCHEMAS = {
             distance_km DOUBLE NOT NULL,
             effective_from DATE NOT NULL,
             effective_to DATE,
-            calculation_method STRING DEFAULT 'haversine',
+            calculation_method STRING,
             _pipeline_run_id STRING
         )
         USING DELTA
@@ -113,7 +109,6 @@ SILVER_SCHEMAS = {
             'quality' = 'silver'
         )
     """,
-    
     "silver_data_quality_issues": """
         CREATE TABLE IF NOT EXISTS {schema}.silver_data_quality_issues (
             issue_id STRING NOT NULL,
@@ -141,7 +136,4 @@ SILVER_SCHEMAS = {
 
 def get_silver_ddl(schema: str) -> dict[str, str]:
     """Get all Silver DDL statements with schema name applied."""
-    return {
-        name: ddl.format(schema=schema)
-        for name, ddl in SILVER_SCHEMAS.items()
-    }
+    return {name: ddl.format(schema=schema) for name, ddl in SILVER_SCHEMAS.items()}

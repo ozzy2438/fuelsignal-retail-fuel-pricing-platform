@@ -11,6 +11,8 @@ sources:
     api_base: "https://api.onegov.nsw.gov.au/FuelCheckApp/v2/fuel/prices"
     # Alternative: CKAN data resource for historical downloads
     ckan_dataset: "https://data.nsw.gov.au/data/api/3/action/package_show?id=fuel-check"
+    resolved_download_url: "https://data.nsw.gov.au/data/dataset/a97a46fc-2bdd-4b90-ac7f-0cb1e8d7ac3b/resource/5576690a-2d64-4c61-a6a8-fa2975fc9d4e/download/price_history_checks_mar2026.csv"
+    resolved_resource_name: "FuelCheck Price History March 2026"
     data_format: "json"
     frequency: "daily"
     coverage:
@@ -39,6 +41,8 @@ sources:
     description: "Wholesale terminal gate prices published by the Australian Institute of Petroleum"
     provider: "Australian Institute of Petroleum (AIP)"
     landing_page: "https://www.aip.com.au/pricing/terminal-gate-prices"
+    historical_download_page: "https://www.aip.com.au/historical-ulp-and-diesel-tgp-data"
+    resolved_download_url: "https://www.aip.com.au/sites/default/files/download-files/2026-07/AIP_TGP_Data_17-Jul-2026.xlsx"
     # TGP data is typically published as structured tables on the page
     data_format: "html_table"
     frequency: "daily"
@@ -73,10 +77,9 @@ sources:
     name: "NSW Public Holidays"
     description: "Official NSW public holiday dates"
     provider: "NSW Government - Industrial Relations"
-    landing_page: "https://www.industrialrelations.nsw.gov.au/public-holidays/public-holidays-in-nsw"
-    # Alternative structured source
-    alternative_api: "https://data.gov.au/data/api/3/action/package_show?id=australian-holidays"
-    data_format: "html_or_json"
+    landing_page: "https://www.nsw.gov.au/about-nsw/public-holidays"
+    resolved_download_url: "https://www.nsw.gov.au/about-nsw/public-holidays"
+    data_format: "html_table"
     frequency: "annual"
     coverage:
       geographic: "NSW, Australia"

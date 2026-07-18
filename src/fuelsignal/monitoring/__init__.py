@@ -24,7 +24,6 @@ MONITORING_SCHEMAS = {
             'quality' = 'monitoring'
         )
     """,
-    
     "monitoring_data_quality_results": """
         CREATE TABLE IF NOT EXISTS {schema}.monitoring_data_quality_results (
             run_id STRING NOT NULL,
@@ -48,7 +47,6 @@ MONITORING_SCHEMAS = {
             'quality' = 'monitoring'
         )
     """,
-    
     "monitoring_source_freshness": """
         CREATE TABLE IF NOT EXISTS {schema}.monitoring_source_freshness (
             check_timestamp TIMESTAMP NOT NULL,
@@ -72,7 +70,4 @@ MONITORING_SCHEMAS = {
 
 def get_monitoring_ddl(schema: str) -> dict[str, str]:
     """Get all Monitoring DDL statements with schema name applied."""
-    return {
-        name: ddl.format(schema=schema)
-        for name, ddl in MONITORING_SCHEMAS.items()
-    }
+    return {name: ddl.format(schema=schema) for name, ddl in MONITORING_SCHEMAS.items()}

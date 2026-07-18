@@ -66,32 +66,30 @@ NSW_PUBLIC_HOLIDAYS = [
 
 class PublicHolidaysIngester(BaseIngester):
     """Ingester for NSW public holiday data.
-    
+
     Attempts to fetch from data.gov.au API first,
     falls back to curated known holiday list.
     """
-    
+
     def __init__(self):
         super().__init__("nsw_public_holidays")
-    
+
     def fetch(self) -> dict:
         """Fetch public holiday data.
-        
+
         Strategy:
         1. Try data.gov.au API for structured holiday data
         2. Fall back to curated list from official NSW Government calendar
         """
-        log_pipeline_event(
-            logger, "Starting public holidays fetch", "bronze"
-        )
-        
+        log_pipeline_event(logger, "Starting public holidays fetch", "bronze")
+
         # Try data.gov.au API
         alt_api = self.source_config.get("alternative_api")
         if alt_api:
             try:
                 response = self.fetch_url(alt_api)
                 api_data = response.json()
-                
+
                 if api_data.get("success"):
                     resources = api_data.get("result", {}).get("resources", [])
                     for resource in resources:
@@ -99,11 +97,21 @@ class PublicHolidaysIngester(BaseIngester):
                             try:
                                 res_response = self.fetch_url(resource["url"])
                                 return {
-                                    "holidays": res_response.json() if resource["format"].upper() == "JSON" else res_response.text,
+                                    "holidays": (
+                                        res_response.json()
+                                        if resource["format"].upper() == "JSON"
+                                        else res_response.text
+                                    ),
                                     "source_method": "data_gov_au_api",
                                     "resource_url": resource["url"],
                                 }
-                            except Exception:
+                            except Exception as e:
+                                log_pipeline_event(
+                                    logger,
+                                    f"Failed to download holiday resource: {str(e)[:100]}",
+                                    "bronze",
+                                    status="warning",
+                                )
                                 continue
             except Exception as e:
                 log_pipeline_event(
@@ -112,48 +120,50 @@ class PublicHolidaysIngester(BaseIngester):
                     "bronze",
                     status="warning",
                 )
-        
+
         # Fallback: use curated known holidays
         log_pipeline_event(
             logger,
             "Using curated NSW public holiday list (source: NSW Industrial Relations)",
             "bronze",
         )
-        
+
         self._metadata["record_count"] = len(NSW_PUBLIC_HOLIDAYS)
         self._metadata["status"] = "success"
         self._metadata["source_url"] = self.source_config["landing_page"]
-        
+
         return {
             "holidays": NSW_PUBLIC_HOLIDAYS,
             "source_method": "curated_official_list",
         }
-    
+
     def to_raw_records(self, data: Any) -> list[dict]:
         """Convert holiday data to Bronze-ready records."""
         records = []
         ingested_at = datetime.now(timezone.utc).isoformat()
-        
+
         holidays = data.get("holidays", [])
-        
+
         if isinstance(holidays, list):
             for holiday in holidays:
                 record_hash = compute_record_hash(
                     holiday.get("date", ""),
                     holiday.get("name", ""),
                 )
-                records.append({
-                    "date": holiday.get("date"),
-                    "holiday_name": holiday.get("name"),
-                    "state": "NSW",
-                    "is_national": holiday.get("is_national", False),
-                    "_ingested_at": ingested_at,
-                    "_source_name": "nsw_public_holidays",
-                    "_source_url": self.source_config["landing_page"],
-                    "_source_file": data.get("source_method", ""),
-                    "_source_record_hash": record_hash,
-                    "_pipeline_run_id": self.run_id,
-                })
-        
+                records.append(
+                    {
+                        "date": holiday.get("date"),
+                        "holiday_name": holiday.get("name"),
+                        "state": "NSW",
+                        "is_national": holiday.get("is_national", False),
+                        "_ingested_at": ingested_at,
+                        "_source_name": "nsw_public_holidays",
+                        "_source_url": self.source_config["landing_page"],
+                        "_source_file": data.get("source_method", ""),
+                        "_source_record_hash": record_hash,
+                        "_pipeline_run_id": self.run_id,
+                    }
+                )
+
         self._metadata["record_count"] = len(records)
         return records

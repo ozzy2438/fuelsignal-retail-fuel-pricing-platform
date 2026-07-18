@@ -12,9 +12,8 @@ The NSW FuelCheck data provides:
 - Near real-time pricing updates
 """
 
-import json
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 from fuelsignal.ingestion.base import BaseIngester
 from fuelsignal.logging import get_logger, log_pipeline_event
@@ -25,32 +24,30 @@ logger = get_logger(__name__)
 
 class FuelCheckIngester(BaseIngester):
     """Ingester for NSW FuelCheck data.
-    
+
     Attempts multiple data access methods:
     1. CKAN API for bulk historical data
     2. Direct resource download if available
     3. FuelCheck API for current prices (requires API key)
     """
-    
+
     def __init__(self):
         super().__init__("nsw_fuelcheck")
         self._raw_data = None
-    
+
     def fetch(self) -> dict:
         """Fetch FuelCheck data from Data.NSW CKAN API.
-        
+
         Strategy:
         1. Query CKAN package metadata to find downloadable resources
         2. Download the most recent CSV/JSON resource
         3. Fall back to API if bulk download unavailable
-        
+
         Returns:
             Dictionary with 'stations' and 'prices' data.
         """
-        log_pipeline_event(
-            logger, "Starting FuelCheck data fetch", "bronze"
-        )
-        
+        log_pipeline_event(logger, "Starting FuelCheck data fetch", "bronze")
+
         # Step 1: Query CKAN for available resources
         ckan_url = self.source_config.get("ckan_dataset")
         if ckan_url:
@@ -63,7 +60,7 @@ class FuelCheckIngester(BaseIngester):
                     "bronze",
                     status="warning",
                 )
-        
+
         # Step 2: Try landing page for direct download links
         landing_page = self.source_config.get("landing_page")
         log_pipeline_event(
@@ -72,34 +69,34 @@ class FuelCheckIngester(BaseIngester):
             "bronze",
             status="warning",
         )
-        
+
         return {"stations": [], "prices": [], "source_method": "ckan_api"}
-    
+
     def _fetch_via_ckan(self, ckan_url: str) -> dict:
         """Fetch data via CKAN API.
-        
+
         The CKAN package_show endpoint returns metadata about
         available resources (CSV, JSON files) for download.
         """
         response = self.fetch_url(ckan_url)
         package_info = response.json()
-        
+
         if not package_info.get("success"):
             raise ValueError("CKAN API returned unsuccessful response")
-        
+
         result = package_info.get("result", {})
         resources = result.get("resources", [])
-        
+
         log_pipeline_event(
             logger,
             f"Found {len(resources)} resources in CKAN package",
             "bronze",
-            details={"resource_count": len(resources)}
+            details={"resource_count": len(resources)},
         )
-        
+
         # Find the most suitable resource (prefer CSV or JSON)
         data = {"stations": [], "prices": [], "resources_found": []}
-        
+
         for resource in resources:
             resource_info = {
                 "id": resource.get("id"),
@@ -110,7 +107,7 @@ class FuelCheckIngester(BaseIngester):
                 "size": resource.get("size"),
             }
             data["resources_found"].append(resource_info)
-            
+
             # Try to download price data resources
             if resource.get("url") and resource.get("format", "").upper() in ("CSV", "JSON"):
                 try:
@@ -119,21 +116,21 @@ class FuelCheckIngester(BaseIngester):
                         resource_data = resource_response.json()
                     else:
                         resource_data = resource_response.text
-                    
+
                     data["raw_resource"] = {
                         "resource_id": resource.get("id"),
                         "format": resource.get("format"),
                         "content": resource_data,
                     }
                     data["source_method"] = "ckan_resource_download"
-                    
+
                     log_pipeline_event(
                         logger,
                         f"Downloaded resource: {resource.get('name')}",
                         "bronze",
                     )
                     break
-                    
+
                 except Exception as e:
                     log_pipeline_event(
                         logger,
@@ -141,14 +138,14 @@ class FuelCheckIngester(BaseIngester):
                         "bronze",
                         status="warning",
                     )
-        
+
         self._metadata["record_count"] = len(data.get("prices", []))
         self._metadata["status"] = "success"
         return data
-    
+
     def to_raw_records(self, data: Any) -> list[dict]:
         """Convert fetched data to Bronze-ready raw records.
-        
+
         Each record includes ingestion metadata columns:
         - _ingested_at
         - _source_name
@@ -159,7 +156,7 @@ class FuelCheckIngester(BaseIngester):
         """
         records = []
         ingested_at = datetime.now(timezone.utc).isoformat()
-        
+
         if isinstance(data, dict):
             # Handle CKAN resource data
             raw_content = data.get("raw_resource", {}).get("content")
@@ -171,15 +168,17 @@ class FuelCheckIngester(BaseIngester):
                         item.get("Price", item.get("price", "")),
                         item.get("TransactionDateUtc", item.get("last_updated", "")),
                     )
-                    records.append({
-                        **item,
-                        "_ingested_at": ingested_at,
-                        "_source_name": "nsw_fuelcheck",
-                        "_source_url": self._metadata.get("source_url", ""),
-                        "_source_file": data.get("raw_resource", {}).get("resource_id", ""),
-                        "_source_record_hash": record_hash,
-                        "_pipeline_run_id": self.run_id,
-                    })
-        
+                    records.append(
+                        {
+                            **item,
+                            "_ingested_at": ingested_at,
+                            "_source_name": "nsw_fuelcheck",
+                            "_source_url": self._metadata.get("source_url", ""),
+                            "_source_file": data.get("raw_resource", {}).get("resource_id", ""),
+                            "_source_record_hash": record_hash,
+                            "_pipeline_run_id": self.run_id,
+                        }
+                    )
+
         self._metadata["record_count"] = len(records)
         return records
