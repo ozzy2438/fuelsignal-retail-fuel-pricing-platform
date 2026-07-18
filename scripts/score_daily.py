@@ -111,29 +111,43 @@ def fetch_latest_eligible_market_date(client: DatabricksSqlClient, fuel_types: l
 
 
 def find_latest_forecast_models(mlflow_client: MlflowClient) -> tuple[dict[int, object], str]:
-    """Most recent finished pricing-policy run's logged 3-day/7-day forecast models
-    - never refit here, matching the "reuse, don't retrain" rule."""
+    """Most recent finished pricing-policy *backtest* run's logged 3-day/7-day
+    forecast models - never refit here, matching the "reuse, don't retrain" rule.
+
+    Filtered specifically to backtest runs (`tags.phase =
+    "week2-phase5-pricing-policy-operationalisation"`, the tag
+    scripts/run_pricing_policy_backtest.py sets on its own run) because this
+    script's own daily-scoring runs also land in the same
+    `/Shared/fuelsignal-pricing-policy` experiment and never log a forecast model -
+    a naive "most recent run in the experiment" query can pick up one of those and
+    find no model at all (live-verified 2026-07-18). Checks up to 5 candidate runs,
+    not just the newest, in case any single backtest run's model logging failed
+    partway through.
+    """
     experiment = mlflow_client.get_experiment_by_name("/Shared/fuelsignal-pricing-policy")
     runs = mlflow_client.search_runs(
         [experiment.experiment_id],
-        filter_string="status = 'FINISHED'",
+        filter_string=(
+            "status = 'FINISHED' and "
+            "tags.phase = 'week2-phase5-pricing-policy-operationalisation'"
+        ),
         order_by=["start_time DESC"],
-        max_results=1,
+        max_results=5,
     )
     if not runs:
-        raise RuntimeError("No finished pricing-policy run with logged forecast models found")
-    run = runs[0]
-    models: dict[int, object] = {}
-    for out in run.outputs.model_outputs:
-        logged_model = mlflow_client.get_logged_model(out.model_id)
-        name = logged_model.name
-        if name == "forecast_model_h3":
-            models[3] = mlflow.lightgbm.load_model(f"models:/{out.model_id}")
-        elif name == "forecast_model_h7":
-            models[7] = mlflow.lightgbm.load_model(f"models:/{out.model_id}")
-    if 3 not in models or 7 not in models:
-        raise RuntimeError(f"Run {run.info.run_id} is missing a forecast_model_h3/h7 artifact")
-    return models, run.info.run_id
+        raise RuntimeError("No finished pricing-policy backtest run found")
+    for run in runs:
+        models: dict[int, object] = {}
+        for out in run.outputs.model_outputs:
+            logged_model = mlflow_client.get_logged_model(out.model_id)
+            name = logged_model.name
+            if name == "forecast_model_h3":
+                models[3] = mlflow.lightgbm.load_model(f"models:/{out.model_id}")
+            elif name == "forecast_model_h7":
+                models[7] = mlflow.lightgbm.load_model(f"models:/{out.model_id}")
+        if 3 in models and 7 in models:
+            return models, run.info.run_id
+    raise RuntimeError("No recent backtest run has both forecast_model_h3 and h7 logged")
 
 
 def main() -> int:
