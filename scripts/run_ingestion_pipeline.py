@@ -108,10 +108,27 @@ def fetch_required(url: str, timeout: int, retries: int) -> tuple[bytes, float]:
     raise RuntimeError(f"Required source unavailable: {url}: {last_error}") from last_error
 
 
+def _cli_credential(flag: str) -> str | None:
+    """Read a `--flag value` pair from sys.argv - Databricks Jobs' serverless
+    spark_python_task does not reliably inject `spark_env_vars` into the process
+    environment (live-verified 2026-07-18: DATABRICKS_HOST/TOKEN were empty inside
+    the task despite being set on the task definition), so job parameters
+    (`spark_python_task.parameters`, which Databricks does substitute
+    `{{secrets/scope/key}}` templates into) are the reliable channel for scheduled
+    runs. Local/CLI execution never passes these flags, so this is a no-op there."""
+    argv = sys.argv[1:]
+    if flag in argv:
+        idx = argv.index(flag)
+        if idx + 1 < len(argv):
+            return argv[idx + 1]
+    return None
+
+
 def databricks_auth() -> tuple[str, str]:
-    """Load PAT environment variables or a short-lived Databricks CLI OAuth token."""
-    host = os.environ.get("DATABRICKS_HOST", "").strip()
-    token = os.environ.get("DATABRICKS_TOKEN", "").strip()
+    """Load PAT environment variables, CLI-provided credentials (see
+    `_cli_credential`), or a short-lived Databricks CLI OAuth token, in that order."""
+    host = os.environ.get("DATABRICKS_HOST", "").strip() or _cli_credential("--databricks-host")
+    token = os.environ.get("DATABRICKS_TOKEN", "").strip() or _cli_credential("--databricks-token")
     if host and token:
         return host.rstrip("/"), token
 

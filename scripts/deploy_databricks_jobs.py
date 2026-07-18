@@ -84,11 +84,20 @@ ML_DEPS = [*BASE_DEPS, "lightgbm>=4.0.0", "scikit-learn>=1.3.0", "mlflow>=2.10.0
 TIMEZONE = "Australia/Sydney"
 
 
-def _env_vars(host: str) -> dict[str, str]:
-    return {
-        "DATABRICKS_HOST": host,
-        "DATABRICKS_TOKEN": "{{secrets/fuelsignal/token}}",
-    }
+def _credential_parameters(host: str) -> list[str]:
+    # spark_env_vars does NOT reliably reach the process environment for a
+    # serverless spark_python_task (live-verified 2026-07-18: DATABRICKS_HOST/TOKEN
+    # were empty inside the task despite being set here) - job parameters are the
+    # channel that actually works, and are the documented way to substitute a
+    # `{{secrets/scope/key}}` reference into a task at run time. Every script's
+    # databricks_auth() (run_ingestion_pipeline.py) reads these two flags from
+    # sys.argv before falling back to environment variables / CLI OAuth.
+    return [
+        "--databricks-host",
+        host,
+        "--databricks-token",
+        "{{secrets/fuelsignal/token}}",
+    ]
 
 
 def _task(
@@ -103,9 +112,12 @@ def _task(
         # file runs through an exec-style context, not a plain `python file.py`
         # invocation) - every script's PROJECT_ROOT falls back to Path.cwd() to
         # handle that; see the try/except at the top of each script.
-        "spark_python_task": {"python_file": python_file, "source": "GIT"},
+        "spark_python_task": {
+            "python_file": python_file,
+            "source": "GIT",
+            "parameters": _credential_parameters(host),
+        },
         "environment_key": task_key,
-        "spark_env_vars": _env_vars(host),
     }
     if depends_on:
         task["depends_on"] = [{"task_key": depends_on}]
