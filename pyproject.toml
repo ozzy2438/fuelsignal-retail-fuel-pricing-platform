@@ -53,6 +53,10 @@ line-length = 100
 select = ["E", "F", "W", "I", "N", "UP", "S", "B", "A", "COM", "C4", "PT"]
 ignore = ["S101", "COM812"]
 
+[tool.ruff.lint.flake8-pytest-style]
+mark-parentheses = false
+fixture-parentheses = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

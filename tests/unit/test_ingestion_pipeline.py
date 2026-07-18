@@ -20,13 +20,13 @@ sys.modules[SPEC.name] = pipeline
 SPEC.loader.exec_module(pipeline)
 
 
-@pytest.mark.unit()
+@pytest.mark.unit
 def test_sql_literal_escapes_single_quotes() -> None:
     assert pipeline.sql_literal("King's Birthday") == "'King''s Birthday'"
     assert pipeline.sql_literal(None) == "NULL"
 
 
-@pytest.mark.unit()
+@pytest.mark.unit
 def test_parse_aip_workbook_normalizes_city_rows() -> None:
     output = io.BytesIO()
     petrol = pd.DataFrame(
@@ -55,7 +55,7 @@ def test_parse_aip_workbook_normalizes_city_rows() -> None:
     ]
 
 
-@pytest.mark.unit()
+@pytest.mark.unit
 def test_parse_holiday_page_skips_not_applicable_and_cleans_footnotes() -> None:
     html = b"""
     <table>

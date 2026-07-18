@@ -33,13 +33,13 @@ class FakeClient:
         raise AssertionError(f"Unexpected SQL: {statement}")
 
 
-@pytest.mark.unit()
+@pytest.mark.unit
 def test_validate_identifier_rejects_sql_injection() -> None:
     with pytest.raises(ValueError, match="Invalid catalog"):
         deployment.validate_identifier("main; DROP CATALOG main", "catalog")
 
 
-@pytest.mark.unit()
+@pytest.mark.unit
 def test_resolve_catalog_reuses_existing_catalog() -> None:
     client = FakeClient({"fuelsignal", "main"})
 
@@ -49,7 +49,7 @@ def test_resolve_catalog_reuses_existing_catalog() -> None:
     assert client.statements == ["SHOW CATALOGS"]
 
 
-@pytest.mark.unit()
+@pytest.mark.unit
 def test_resolve_catalog_creates_missing_catalog() -> None:
     client = FakeClient({"main"})
 
@@ -58,7 +58,7 @@ def test_resolve_catalog_creates_missing_catalog() -> None:
     assert (catalog, created) == ("fuelsignal", True)
 
 
-@pytest.mark.unit()
+@pytest.mark.unit
 def test_resolve_catalog_falls_back_to_main() -> None:
     client = FakeClient({"main"}, deployment.DeploymentError("permission denied"))
 
